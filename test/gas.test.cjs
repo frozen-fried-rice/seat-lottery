@@ -1279,6 +1279,8 @@ test('回帰2: 以前の版でJ列（受付確認キーの場所）にメモが�
   add(['A', 'B']);
   const sh = ctx.__mock.sheet('参加者');
   sh.getRange(1, 10, 3, 1).setValues([['メモ'], ['ベジタリアン'], ['']]);
+  const set = ctx.__mock.sheet('設定'), vr = set._dump().findIndex(r => r[0] === 'sheetVersion') + 1;
+  set.getRange(vr, 1, 1, 2).setValues([['', '']]);        // 以前の版の設定には sheetVersion が無い
   const code = joinCodeOf(admin('adminGetState'));
   call('joinClaim', code, byName('A').id, 'k'.repeat(20));
   const v = ctx.__mock.values('参加者');
@@ -1398,6 +1400,86 @@ test('HTMLの中のスクリプトに文法エラーがない（Admin / Particip
     assert.ok(scripts.length >= 1, f + ' にスクリプトがある');
     scripts.forEach((code, i) => { try { new vm.Script(code, { filename: f + '.html#script' + i }); } catch (e) { assert.fail(f + '.html: ' + e.message); } });
   }
+});
+
+
+test('回帰3: 返ってきたIDは必ず保存済み（シートに直接書き足した方がいる状態で設定変更・まとめ操作をしても）', () => {
+  const { ctx, add, admin, call } = fresh();
+  const [a] = add(['A']).state.people;
+  const sh = ctx.__mock.sheet('参加者');
+  for (const op of [() => admin('adminSaveSettings', { drinkOpen: false }), () => admin('adminResetJoinCode'), () => admin('adminDrawOne', a.id)]) {
+    sh.getRange(sh.getLastRow() + 1, 3).setValue('手入力' + sh.getLastRow());
+    const st = op();
+    for (const p of st.people) assert.equal(call('participantGet', p.token).name, p.name, p.name + ' のトークンが保存されている');
+    admin('adminUpdatePerson', st.people[st.people.length - 1].id, { drink: 'ビール' });
+  }
+});
+
+test('回帰3: 今の版で見出し（I1・J1）を書き換えても、列は差し込まず受付の記録も消えない', () => {
+  const { ctx, add, admin, call, byName } = fresh();
+  add(['A']);
+  const code = joinCodeOf(admin('adminGetState'));
+  call('joinClaim', code, byName('A').id, 'k'.repeat(20));
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(1, 9).setValue('受付日時(自動)');
+  add(['B']);
+  const v = ctx.__mock.values('参加者');
+  assert.deepEqual(v[0].slice(8, 10), ['受付日時', '受付確認キー']);
+  throwsMsg(() => call('joinClaim', code, byName('A').id, 'z'.repeat(20)), /すでに受付済み/);
+  assert.equal(call('joinClaim', code, byName('A').id, 'k'.repeat(20)).view.name, 'A');
+});
+
+test('回帰3: 書き込み中に行がずれていたら（手作業で行を削除した直後など）、別の方の行に書かない', () => {
+  const { ctx, add, call } = fresh();
+  const [a, b, c] = add(['A', 'B', 'C']).state.people;
+  call('participantGet', b.token); call('participantGet', c.token);
+  // B のドリンク登録で、ロックを取って読み込んだ直後に幹事が2行目（A）を手で削除した
+  ctx.__mock.run(`(function(){ const orig = saveRow_; saveRow_ = function(db, p){ saveRow_ = orig; SpreadsheetApp.getActiveSpreadsheet().getSheetByName('参加者').deleteRows(2, 1); return orig(db, p); }; })()`);
+  throwsMsg(() => call('participantSetDrink', b.token, 'ビール'), /混み合って/);
+  const v = call('participantGet', c.token);
+  assert.equal(v.name, 'C'); assert.equal(v.drink, null, 'C の行が B で上書きされない');
+  assert.equal(call('participantSetDrink', b.token, 'ビール').drink, 'ビール', 'やり直せば登録できる');
+});
+
+test('回帰3: 設定シートの空行・メモ・キーの無い値は、保存しても位置がずれたり消えたりしない', () => {
+  const { ctx, admin } = fresh();
+  const sh = ctx.__mock.sheet('設定');
+  const last = sh.getLastRow();
+  sh.getRange(1, 3).setValue('席数のメモ');
+  sh.getRange(last + 2, 1, 1, 2).setValues([['', 'キーの無い値']]);
+  const seatsRow = sh._dump().findIndex(r => r[0] === 'seats') + 1;
+  sh.getRange(seatsRow, 3).setValue('← 席数');
+  admin('adminSaveSettings', { seats: 30, event: '会' });
+  const v = sh._dump();
+  assert.equal(v[seatsRow - 1][0], 'seats'); assert.equal(String(v[seatsRow - 1][1]), '30'); assert.equal(v[seatsRow - 1][2], '← 席数');
+  assert.equal(v[last + 1][1], 'キーの無い値');
+});
+
+test('回帰3: 右の列にメモが残った行には、新しい方を入れない', () => {
+  const { ctx, add } = fresh();
+  add(['A', 'B', 'C']);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(4, 11).setValue('Cは卵アレルギー');
+  sh.getRange(4, 1, 1, 10).setValues([Array(10).fill('')]);
+  add(['D']);
+  const v = ctx.__mock.values('参加者');
+  const d = v.findIndex(r => r[2] === 'D');
+  assert.notEqual(v[d][10], 'Cは卵アレルギー');
+});
+
+test('回帰3: 行をコピーして元の行のお名前を打ち直しても、スマホのトークンは同じ方のまま', () => {
+  const { ctx, add, call, admin } = fresh();
+  const [a] = add(['A', 'B']).state.people;
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(4, 1, 1, 10).setValues([sh.getRange(2, 1, 1, 10).getValues()[0]]);
+  sh.getRange(2, 3).setValue('');
+  admin('adminGetState');
+  sh.getRange(2, 3).setValue('A');
+  const st = admin('adminGetState');
+  const ids = st.people.map(p => p.id);
+  assert.equal(new Set(ids).size, ids.length, 'IDが重ならない');
+  const v = call('participantGet', st.people.find(p => p.name === 'A' && p.token === a.token) ? a.token : st.people[0].token);
+  assert.equal(v.name, 'A');
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);

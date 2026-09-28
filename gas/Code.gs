@@ -244,7 +244,7 @@ function adminDrawOne(key, id) {
   checkKey_(key);
   return withLock_(function () {
     const db = load_(true);
-    if (drawFor_(db, findById_(db, id))) save_(db);
+    if (drawFor_(db, findById_(db, id)) || db.dirty) save_(db);
     return adminState_(db);
   });
 }
@@ -278,6 +278,7 @@ function adminSaveSettings(key, s) {
       st.joinOpen = s.joinOpen;
     }
     saveSettings_(db);
+    if (db.dirty) save_(db); // シートに直接書き足した方の仮のIDを、返す前に保存します
     SpreadsheetApp.flush();
     return adminState_(db);
   });
@@ -302,6 +303,7 @@ function adminResetJoinCode(key) {
     const db = load_(true);
     db.settings.joinCode = randomString_(12);
     saveSettings_(db);
+    if (db.dirty) save_(db);
     SpreadsheetApp.flush();
     return adminState_(db);
   });
@@ -539,9 +541,12 @@ function ensurePeopleSheet_(ss) {
   else if (sh.getLastRow() >= 1) {
     const head = sh.getRange(1, 1, 1, HEADERS_.length).getValues()[0].map(function (v) { return String(v).trim(); });
     if (head.join('\t') !== HEADERS_.join('\t')) {
-      // 以前の版（8列・9列）から更新したとき：新しく使う列（I・J）に幹事のメモなどがあれば、列を差し込んで右へずらしてから見出しを書きます
-      for (let c = 8; c < HEADERS_.length; c++) {
-        if (head[c] !== '' && head[c] !== HEADERS_[c]) { sh.insertColumnBefore(c + 1); head.splice(c, 0, ''); }
+      // 以前の版（8列・9列。設定に sheetVersion が無い）から更新したときだけ：新しく使う列（I・J）に幹事のメモなどがあれば、
+      // 列を差し込んで右へずらしてから見出しを書きます。今の版で見出しが書き換えられただけなら、見出しを書き直すだけです
+      if (!settingsHas_(ss, 'sheetVersion')) {
+        for (let c = 8; c < HEADERS_.length; c++) {
+          if (head[c] !== '' && head[c] !== HEADERS_[c]) { sh.insertColumnBefore(c + 1); head.splice(c, 0, ''); }
+        }
       }
       writeHeaders_(sh);
     }
@@ -551,12 +556,17 @@ function ensurePeopleSheet_(ss) {
 
 function ensureSettingsSheet_(ss) { return ensureSettings_(ss).sheet; }
 
+function settingsHas_(ss, key) {
+  const sh = ss.getSheetByName(SHEET_SETTINGS_);
+  return !!sh && readKeyValues_(sh).some(function (r) { return r[0] === key; });
+}
+
 function ensureSettings_(ss) {
   let sh = ss.getSheetByName(SHEET_SETTINGS_);
   const fresh = !sh;
   if (!sh) sh = ss.insertSheet(SHEET_SETTINGS_);
   const rows = readKeyValues_(sh);
-  const defaults = { seats: String(DEFAULT_SEATS_), event: '', drinks: DEFAULT_DRINKS_.join('\n'), drinkOpen: 'TRUE', baseUrl: '', joinCode: randomString_(12), joinOpen: 'TRUE' };
+  const defaults = { seats: String(DEFAULT_SEATS_), event: '', drinks: DEFAULT_DRINKS_.join('\n'), drinkOpen: 'TRUE', baseUrl: '', joinCode: randomString_(12), joinOpen: 'TRUE', sheetVersion: '2' };
   let changed = fresh;
   Object.keys(defaults).forEach(function (k) {
     if (!rows.some(function (r) { return r[0] === k; })) { rows.push([k, defaults[k]]); changed = true; }
@@ -565,23 +575,41 @@ function ensureSettings_(ss) {
   return { sheet: sh, rows: rows };
 }
 
+/* [キー, 値, 行番号] の一覧。キーの無い行は含めません */
 function readKeyValues_(sh) {
   const last = sh.getLastRow();
   if (last < 1) return [];
-  return sh.getRange(1, 1, last, 2).getValues()
-    .map(function (r) { return [String(r[0]).trim(), r[1]]; })
-    .filter(function (r) { return r[0]; });
+  const out = [];
+  sh.getRange(1, 1, last, 2).getValues().forEach(function (r, i) {
+    const k = String(r[0]).trim();
+    if (k) out.push([k, r[1], i + 1]);
+  });
+  return out;
 }
 
-/* 先に全体を消さず、上から上書きして余った行だけ消します（同時に読んでいる実行が空のシートを見ないように）。 */
+/*
+ * 設定を書き込みます。今ある行はその場所で書き換え、新しいキーは最後の行の下に足します
+ * （行を詰めないので、幹事が右の列に書いたメモや空行の位置がずれません）。
+ */
 function writeKeyValues_(sh, rows) {
+  // 書き込む直前の中身を読み、キーの名前で行を探します（読み込んだあとに行が動いていても、正しい行に書くため）
   const last = sh.getLastRow();
-  if (rows.length) {
-    const r = sh.getRange(1, 1, rows.length, 2);
-    r.setNumberFormat('@');
-    r.setValues(rows.map(function (x) { return [x[0], x[1] === null || x[1] === undefined ? '' : String(x[1])]; }));
-  }
-  if (last > rows.length) sh.getRange(rows.length + 1, 1, last - rows.length, 2).clearContent();
+  const grid = last ? sh.getRange(1, 1, last, 2).getValues() : [];
+  const at = Object.create(null);
+  grid.forEach(function (g, i) { const k = String(g[0]).trim(); if (k) (at[k] = at[k] || []).push(i); });
+  const val = function (x) { return [x[0], x[1] === null || x[1] === undefined ? '' : String(x[1])]; };
+  rows.forEach(function (x) {
+    if (at[x[0]]) at[x[0]].forEach(function (i) { grid[i] = val(x); });
+    else { grid.push(val(x)); at[x[0]] = [grid.length - 1]; }
+    x[2] = at[x[0]][0] + 1;
+  });
+  const end = grid.length;
+  if (!end) return;
+  const maxRows = sh.getMaxRows();
+  if (end > maxRows) sh.insertRowsAfter(maxRows, end - maxRows);
+  const r = sh.getRange(1, 1, end, 2);
+  r.setNumberFormat('@');
+  r.setValues(grid.map(function (g) { return [g[0] === null || g[0] === undefined ? '' : String(g[0]), g[1] === null || g[1] === undefined ? '' : String(g[1])]; }));
 }
 
 function parseSettings_(rows) {
@@ -618,7 +646,7 @@ function saveSettings_(db) {
   const vals = { seats: String(st.seats), event: st.event, drinks: st.drinksRaw, drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl,
     joinCode: st.joinCode || randomString_(12), joinOpen: st.joinOpen ? 'TRUE' : 'FALSE' };
   st.joinCode = vals.joinCode;
-  const rows = st.rows.map(function (r) { return [r[0], has_(vals, r[0]) ? vals[r[0]] : r[1]]; });
+  const rows = st.rows.map(function (r) { return [r[0], has_(vals, r[0]) ? vals[r[0]] : r[1], r[2]]; });
   Object.keys(vals).forEach(function (k) { if (!rows.some(function (r) { return r[0] === k; })) rows.push([k, vals[k]]); });
   st.rows = rows;
   writeKeyValues_(db.settingsSheet, rows);
@@ -657,7 +685,7 @@ function load_(locked) {
       db.loadedRows.push(row);
       if (!name) {
         // お名前だけ消えている行（打ち直しの途中など）は、その場所にそのまま残します。席も使用中として扱います
-        db.ghosts.push({ raw: r.slice(0, W), seat: seatOf_(r[4]), row: row });
+        db.ghosts.push({ raw: r.slice(0, W), seat: seatOf_(r[4]), row: row, origId: cellText_(r[0]) });
         return;
       }
       named.push({ r: r, row: row, name: name });
@@ -666,13 +694,17 @@ function load_(locked) {
     const tokenCount = Object.create(null);
     named.forEach(function (x) { const t = cellText_(x.r[1]); if (t) tokenCount[t] = (tokenCount[t] || 0) + 1; });
     db.ghosts.forEach(function (g) { const t = cellText_(g.raw[1]); if (t && tokenCount[t]) { g.raw[1] = ''; db.dirty = true; } });
+    // お名前の無い行のIDが名簿の方と同じなら（行のコピーなど）、名簿の方を優先して、お名前の無い行のIDを消します
+    const namedIds = Object.create(null);
+    named.forEach(function (x) { const i = cellText_(x.r[0]); if (i) namedIds[i] = true; });
+    db.ghosts.forEach(function (g) { const i = cellText_(g.raw[0]); if (i && namedIds[i]) { g.raw[0] = ''; db.dirty = true; } });
     const ids = Object.create(null);
     named.forEach(function (x) {
       const r = x.r, id = cellText_(r[0]), token = cellText_(r[1]);
       const kind = cellText_(r[3]) === '固定' || cellText_(r[3]) === 'fixed' ? 'fixed' : 'lottery';
       const rawSeat = seatOf_(r[4]);
       const p = { id: id, token: token, name: x.name, kind: kind, seat: kind === 'lottery' ? rawSeat : null, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]),
-        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row };
+        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row, origId: id };
       if ((rawSeat === null && r[4] !== '' && r[4] !== null) || (kind === 'fixed' && rawSeat !== null)) db.dirty = true;
       if (!p.id || ids[p.id]) { p.id = null; db.dirty = true; }
       if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokenCount[p.token] > 1) { p.token = null; p.claimedAt = null; p.claimKey = null; db.dirty = true; }
@@ -719,8 +751,24 @@ function ghostValues_(g) {
  * ・新しい方は最後の行の下に足します
  * ・A〜J列だけを書き込みます（先に全体を消さないので、同時に読んでいる実行が空の名簿を見ることもありません）
  */
+/*
+ * 書き込む前に、読み込んだ行がまだ同じ場所にあるか（A列のIDが同じか）を確かめます。
+ * スクリプトのロックの外で幹事がシートの行を消した・並べ替えた直後だと、別の方の行に書いてしまうためです。
+ * ずれていたら「混み合っています」として書かずに終わります（参加者の画面は自動でやり直します）。
+ */
+function verifyRows_(db) {
+  const rows = db.people.filter(function (p) { return p.row && !p.isNew; }).map(function (p) { return [p.row, p.origId]; })
+    .concat(db.ghosts.map(function (g) { return [g.row, g.origId]; }));
+  if (!rows.length) return;
+  const max = rows.reduce(function (m, x) { return x[0] > m ? x[0] : m; }, 2);
+  if (max > db.sheet.getMaxRows()) throw new Error(ERR_BUSY_);
+  const col = db.sheet.getRange(2, 1, max - 1, 1).getValues();
+  rows.forEach(function (x) { if (cellText_(col[x[0] - 2][0]) !== (x[1] || null)) throw new Error(ERR_BUSY_); });
+}
+
 function save_(db) {
   const sh = db.sheet, W = HEADERS_.length;
+  verifyRows_(db);
   const keep = Object.create(null);
   db.people.forEach(function (p) { if (p.row) keep[p.row] = true; });
   db.ghosts.forEach(function (g) { if (g.row) keep[g.row] = true; });
@@ -743,7 +791,21 @@ function save_(db) {
   let next = 2;
   db.people.forEach(function (p) { if (p.row >= next) next = p.row + 1; });
   db.ghosts.forEach(function (g) { if (g.row >= next) next = g.row + 1; });
-  db.people.forEach(function (p) { if (!p.row) p.row = next++; });
+  const newcomers = db.people.filter(function (p) { return !p.row; });
+  if (newcomers.length) {
+    // 右側の列に文字（メモ）が残っている行には入れません（前の方のメモを引き継がないように）。チェックボックス・数式だけの行は使います
+    const lastCol = sh.getLastColumn(), lastRow = sh.getLastRow();
+    let busyRow = function () { return false; };
+    if (lastCol > W && lastRow >= next) {
+      const rg = sh.getRange(next, W + 1, lastRow - next + 1, lastCol - W), vals = rg.getValues(), fs = rg.getFormulas(), base = next;
+      busyRow = function (r) {
+        const i = r - base;
+        if (i < 0 || i >= vals.length) return false;
+        return vals[i].some(function (v, j) { return !fs[i][j] && v !== '' && v !== null && typeof v !== 'boolean'; });
+      };
+    }
+    newcomers.forEach(function (p) { while (busyRow(next)) next++; p.row = next++; });
+  }
   const byRow = Object.create(null);
   let maxRow = 1;
   db.people.forEach(function (p) { byRow[p.row] = rowValues_(p); if (p.row > maxRow) maxRow = p.row; });
@@ -765,7 +827,8 @@ function save_(db) {
     r = e + 1;
   }
   db.loadedRows = Object.keys(byRow).map(Number);
-  db.people.forEach(function (p) { delete p.tempId; });
+  db.people.forEach(function (p) { delete p.tempId; delete p.isNew; p.origId = p.id; });
+  db.ghosts.forEach(function (g) { g.origId = cellText_(g.raw[0]); });
   db.dirty = false;
   SpreadsheetApp.flush();
 }
@@ -773,6 +836,7 @@ function save_(db) {
 /* 1人分の行だけを書き込みます（参加者の抽選・ドリンク登録用）。読み込み時に直した箇所があれば全体を書き込みます。 */
 function saveRow_(db, p) {
   if (db.dirty || !p.row) { save_(db); return; }
+  if (cellText_(db.sheet.getRange(p.row, 1).getValue()) !== (p.origId || null)) throw new Error(ERR_BUSY_); // 行がずれていたら書かない（上の verifyRows_ と同じ理由）
   const range = db.sheet.getRange(p.row, 1, 1, HEADERS_.length);
   range.setNumberFormat('@');
   db.sheet.getRange(p.row, COL_SEAT_).setNumberFormat('0');
@@ -793,7 +857,7 @@ function newToken_(db) {
 }
 
 function newPerson_(db, name, kind) {
-  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, claimKey: null, row: 0 };
+  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, claimKey: null, row: 0, isNew: true };
 }
 
 function findByToken_(db, token) {
