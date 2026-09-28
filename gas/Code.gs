@@ -109,13 +109,19 @@ function participantSetDrink(token, drink) {
  * なりすましを防ぐため、一度選ばれた名前（受付済み）は別のスマホからは選べません。幹事が「受付をやり直す」で戻せます。
  */
 
-function joinList(code) {
+/* claimKey（このスマホの確認キー）を渡すと、このスマホで受付した方に mine: true を付けます（受付の返事を受け取れなかったときに戻れるように） */
+function joinList(code, claimKey) {
+  const key = validClaimKey_(claimKey);
   let db = load_();
   checkJoin_(db, code);
   db = persistIfDirty_(db); // スプレッドシートに直接書き足した行にも、毎回同じIDが付くように保存しておきます
   return {
     event: db.settings.event,
-    people: db.people.map(function (p) { return { id: p.id, name: p.name, claimed: !!p.claimedAt }; })
+    people: db.people.map(function (p) {
+      const o = { id: p.id, name: p.name, claimed: !!p.claimedAt };
+      if (p.claimedAt && key && p.claimKey === key) o.mine = true;
+      return o;
+    })
   };
 }
 
@@ -124,7 +130,7 @@ function joinList(code) {
  * 同じスマホが同じ claimKey でやり直せば、同じ方として受付を続けられます（ほかのスマホは claimKey を知らないので選べません）。
  */
 function joinClaim(code, id, claimKey) {
-  const key = typeof claimKey === 'string' && /^[A-Za-z0-9]{16,64}$/.test(claimKey) ? claimKey : '';
+  const key = validClaimKey_(claimKey);
   const pre = load_();
   checkJoin_(pre, code);
   const pp = findById_(pre, id);
@@ -400,6 +406,8 @@ function isDate_(v) { return Object.prototype.toString.call(v) === '[object Date
 function getUi_() {
   try { return SpreadsheetApp.getUi() || null; } catch (err) { return null; }
 }
+
+function validClaimKey_(k) { return typeof k === 'string' && /^[A-Za-z0-9]{16,64}$/.test(k) ? k : ''; }
 
 function persistIfDirty_(db) {
   if (!db.dirty) return db;
@@ -787,7 +795,8 @@ function participantView_(db, p) {
     drink: p.drink,
     drinks: st.drinks.slice(),
     drinkOpen: st.drinkOpen,
-    seatsLeft: freeSeats_(db).length
+    seatsLeft: freeSeats_(db).length,
+    link: appUrl_(st) ? appUrl_(st) + '?t=' + p.token : '' // ご本人専用のリンク（共通QRで受付した方がブックマークできるように）
   };
 }
 

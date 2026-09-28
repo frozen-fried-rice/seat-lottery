@@ -72,13 +72,21 @@ const FAKE_GOOGLE = `(() => {
 
 /* ---------- ブラウザまわり ---------- */
 const problems = [];
+const faults = [];
 let base;
 async function newPage(browser, label, viewport) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
-  await context.exposeFunction('__gasCall', (name, argsJson) => {
+  await context.exposeFunction('__gasCall', async (name, argsJson) => {
     calls.push({ label, name });
+    // 障害の再現：{ label?, name, mode: 'fail'（実行せず失敗）| 'lost'（実行したが返事が失われる）| 'hang'（返事が来ない）| 'delay', message?, ms? }
+    const i = faults.findIndex(f => f.name === name && (!f.label || f.label === label));
+    const f = i >= 0 ? faults.splice(i, 1)[0] : null;
+    if (f && f.mode === 'fail') return { ok: false, message: f.message || 'NetworkError: Connection failure due to HTTP 0' };
+    if (f && f.mode === 'hang') return new Promise(() => {});
+    if (f && f.mode === 'delay') await new Promise(r => setTimeout(r, f.ms || 1500));
     try {
       const result = callServer(ctx, name, JSON.parse(argsJson));
+      if (f && f.mode === 'lost') return { ok: false, message: f.message || 'NetworkError: Connection failure due to HTTP 0' };
       return { ok: true, result: result === undefined ? undefined : JSON.stringify(result) };
     } catch (e) { return { ok: false, message: e.message }; }
   });
@@ -545,11 +553,102 @@ async function step(name, fn) {
       await admin.click('#askyes');
       await waitStatus(admin, /共通QRコードを作り直しました/);
       assert.notEqual(await admin.inputValue('#joinlink'), joinUrl);
+      // 受付済みのスマホは、古いQR・新しいQRのどちらから開いても自分の画面に戻れる
       await ph2.reload();
-      await ph2.locator('#bad').waitFor({ state: 'visible' });
-      assert.match(await text(ph2, '#badmsg'), /QRコードが無効/);
+      await ph2.locator('#resulthint').waitFor({ state: 'visible' });
+      assert.equal(await text(ph2, '#name2'), who.name + ' さんのお席');
+      const newCode = (await admin.inputValue('#joinlink')).split('?j=')[1];
+      await open(ph2, { j: newCode });
+      await ph2.locator('#resulthint').waitFor({ state: 'visible' });
+      assert.equal(await ph2.locator('#mylinkbox').isVisible(), true, '自分専用のリンクを案内する');
+      assert.match(await ph2.getAttribute('#mylink', 'href'), new RegExp('\\?t=' + state().people.find(p => p.id === who.id).token + '$'));
+      // まだ受付していないスマホでは、古い共通QRは使えない
+      const ph3 = await newPage(browser, 'join-phone3', { width: 390, height: 844 });
+      await open(ph3, { j: code });
+      await ph3.locator('#bad').waitFor({ state: 'visible' });
+      assert.match(await text(ph3, '#badmsg'), /QRコードが無効/);
       await noHScroll(ph2, 'join phone');
-      await ph.context().close(); await ph2.context().close();
+      await ph.context().close(); await ph2.context().close(); await ph3.context().close();
+    });
+
+    await step('9) 参加者画面の障害・競合：通信エラーの自動やり直し・返事の消失・無応答・演出中の切り替え・すばやい2回タップ', async () => {
+      callServer(ctx, 'adminSaveSettings', [KEY, { seats: 30, joinOpen: true, drinkOpen: true }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['障害 一郎', '障害 二郎', '障害 三郎', '障害 四郎'], 'lottery']);
+      const code = state().settings.joinUrl.split('?j=')[1];
+      const pg = await newPage(browser, 'fault', { width: 390, height: 844 });
+      await pg.addInitScript(() => { window.__SEKI_TIMEOUT_MS = 2500; });
+      // (a) 英語の通信エラー（NetworkError）は自動でやり直し、利用者には英語を見せない
+      faults.push({ label: 'fault', name: 'joinList', mode: 'fail' });
+      await open(pg, { j: code });
+      await pg.locator('#join').waitFor({ state: 'visible', timeout: 15000 });
+      // (b) すばやい2回タップでも確認なしで受付されない
+      await pg.locator('#joinlist button', { hasText: '障害 一郎' }).dblclick();
+      await pg.locator('#confirm').waitFor({ state: 'visible' });
+      assert.equal(state().people.find(p => p.name === '障害 一郎').claimedAt, null, '2回目のタップで受付されない');
+      // (c) 受付は済んだが返事が失われた → 同じスマホの確認キーで自動やり直し → そのまま受付できる
+      faults.push({ label: 'fault', name: 'joinClaim', mode: 'lost' });
+      await pg.waitForTimeout(600);
+      await pg.click('#confirmyes');
+      await pg.locator('#intro').waitFor({ state: 'visible', timeout: 15000 });
+      assert.equal(await text(pg, '#name'), '障害 一郎 さん');
+      // (d) くじの途中で通信エラー → 自動でやり直して席が出る（英語は出ない）
+      faults.push({ label: 'fault', name: 'participantDraw', mode: 'lost', message: 'Exception: Service Spreadsheets timed out while accessing document with id 1abc.' });
+      await pg.click('#draw');
+      await pg.locator('#resulthint').waitFor({ state: 'visible', timeout: 15000 });
+      const seat1 = state().people.find(p => p.name === '障害 一郎').seat;
+      assert.equal((await text(pg, '#number')).replace(/\s/g, ''), seat1 + '番');
+      // (e) ドリンク保存の返事が来ない → 少し待つと通信エラーを表示し、ボタンはまた押せる
+      faults.push({ label: 'fault', name: 'participantSetDrink', mode: 'hang' });
+      await pg.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await pg.locator('#drinkmsg.ng').waitFor({ timeout: 8000 });
+      assert.match(await text(pg, '#drinkmsg'), /通信に失敗しました/);
+      assert.equal(await pg.locator('#drinklist button', { hasText: /^ビール$/ }).isEnabled(), true);
+      await pg.locator('#drinklist button', { hasText: /^コーラ$/ }).click();
+      await pg.locator('#drinkmsg.ok').waitFor();
+      // (f) 「もう一度演出を見る」の途中で「ほかの方の受付をする」→ 一覧のまま（前の人の画面が上から出ない・エラーなし）
+      await pg.click('#again');
+      await pg.click('#switchperson');
+      await pg.locator('#join').waitFor({ state: 'visible' });
+      await pg.waitForTimeout(1800);
+      assert.equal(await pg.locator('#join').isVisible(), true, '演出のタイマーが一覧を上書きしない');
+      assert.equal(await pg.locator('#result').isHidden(), true);
+      // (g) 一覧に「このスマホで受付済み」として出て、押すと戻れる
+      const mine = pg.locator('#joinlist button', { hasText: '障害 一郎' });
+      assert.match(await mine.innerText(), /このスマホで受付済み/);
+      await mine.click();
+      await pg.locator('#resulthint').waitFor({ state: 'visible' });
+      // (h) 幹事が席を空きに戻したあとドリンクを変えると、画面もくじを引く前に戻る
+      const id1 = state().people.find(p => p.name === '障害 一郎').id;
+      callServer(ctx, 'adminUpdatePerson', [KEY, id1, { clearSeat: true }]);
+      await pg.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await pg.locator('#intro').waitFor({ state: 'visible' });
+      assert.equal(await pg.locator('#drinkbox').isHidden(), true);
+      // (i) 前の方の入力・エラー表示が次の方に残らない
+      await pg.click('#draw');
+      await pg.locator('#resulthint').waitFor({ state: 'visible' });
+      await pg.click('#otherbtn');
+      await pg.fill('#otherinput', '前の人のメモ');
+      callServer(ctx, 'adminUpdatePerson', [KEY, id1, { releaseClaim: true }]);
+      await pg.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await pg.locator('#joinerr').filter({ hasText: '取り消されました' }).waitFor();
+      await pg.locator('#joinlist button', { hasText: '障害 二郎' }).click();
+      await pg.waitForTimeout(600);
+      await pg.click('#confirmyes');
+      await pg.click('#draw');
+      await pg.locator('#resulthint').waitFor({ state: 'visible' });
+      assert.equal(await text(pg, '#drinkmsg'), '');
+      assert.equal(await pg.inputValue('#otherinput'), '');
+      // (j) 名前の絞り込み：空白なし・ひらがな/カタカナ・全角英字
+      callServer(ctx, 'adminAddPeople', [KEY, ['ヤマダ ハナ', 'Alice Smith'], 'lottery']);
+      await pg.click('#switchperson');
+      await pg.locator('#join').waitFor({ state: 'visible' });
+      for (const [q, want] of [['やまだ', 'ヤマダ ハナ'], ['ｱﾘｽ', null], ['ＡＬＩＣＥ', 'Alice Smith'], ['alicesmith', 'Alice Smith'], ['障害二郎', '障害 二郎']]) {
+        await pg.fill('#joinsearch', q);
+        const names = await pg.locator('#joinlist button span:first-child').allInnerTexts();
+        if (want) assert.ok(names.includes(want), q + ' → ' + names.join(','));
+        else assert.equal(names.length, 0, q + ' → ' + names.join(','));
+      }
+      await pg.context().close();
     });
 
     await step('ページのエラー・コンソールエラーなし', async () => {

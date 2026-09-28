@@ -231,9 +231,11 @@ test('ID・トークン: 20文字の英数字で重複しない。参加者ビ�
   const chars = new Set(s.people.map(p => p.token).join(''));
   assert.ok(chars.size > 55, '英大文字・小文字・数字が混ざる: ' + chars.size);
   const v = call('participantGet', s.people[3].token);
-  assert.deepEqual(Object.keys(v).sort(), ['drink', 'drinkOpen', 'drinks', 'event', 'fixedLabel', 'kind', 'name', 'seat', 'seatsLeft'].sort());
+  assert.deepEqual(Object.keys(v).sort(), ['drink', 'drinkOpen', 'drinks', 'event', 'fixedLabel', 'kind', 'link', 'name', 'seat', 'seatsLeft'].sort());
   assert.equal(v.name, '参加者4');
-  assert.equal(JSON.stringify(v).includes(s.people[3].token), false);
+  assert.equal(v.link, 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + s.people[3].token, 'ご本人専用のリンク（ご本人のトークンのみ）');
+  assert.equal(JSON.stringify({ ...v, link: '' }).includes(s.people[3].token), false);
+  for (const o of s.people) if (o !== s.people[3]) assert.equal(JSON.stringify(v).includes(o.token), false, '他人のトークンは含まない');
   assert.equal(JSON.stringify(v).includes('参加者5'), false);
   assert.equal(admin('adminGetState').people.length, 150);
 });
@@ -248,7 +250,7 @@ test('participantGet: 不正なトークンはすべて同じエラー', () => {
     throwsMsg(() => ctx.participantSetDrink(bad, 'ビール'), ERR_TOKEN, String(bad));
   }
   const v = call('participantGet', tok);
-  assert.deepEqual(v, { event: '', name: '山田', kind: 'lottery', seat: null, fixedLabel: null, drink: null, drinks: ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'], drinkOpen: true, seatsLeft: 27 });
+  assert.deepEqual(v, { event: '', name: '山田', kind: 'lottery', seat: null, fixedLabel: null, drink: null, drinks: ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'], drinkOpen: true, seatsLeft: 27, link: 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + tok });
 });
 
 /* ================= 抽選 ================= */

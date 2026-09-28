@@ -48,6 +48,9 @@ button:disabled{cursor:default;opacity:.55}
 .confirmname{font-size:26px;font-weight:800;color:#193961;margin:6px 0 4px;overflow-wrap:anywhere}
 .stack{display:grid;gap:10px;margin-top:18px}
 .switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
+.linkbtn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;border-radius:14px;background:#e9eff8;color:#183659;font-weight:700;text-decoration:none}
+.linkbtn:focus-visible,h1:focus-visible,.who:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+#mylinkbox{padding:18px 20px}
 [hidden]{display:none!important}
 @media (max-width:340px){.drinks{grid-template-columns:1fr}.number{font-size:92px}}
 @media (prefers-reduced-motion:reduce){.pop{animation:none}}
@@ -62,14 +65,14 @@ button:disabled{cursor:default;opacity:.55}
  </div>
  <div id="intro" hidden>
   <p class="event" data-ev></p>
-  <h1 id="name"></h1>
+  <h1 id="name" tabindex="-1"></h1>
   <p class="lead">ボタンを押すと、あなたのお席が決まります。</p>
   <p class="err" id="drawerr" role="alert" hidden></p>
   <button class="primary" id="draw">くじを引く</button>
  </div>
  <div id="result" hidden>
   <p class="event" data-ev></p>
-  <p class="who" id="name2"></p>
+  <p class="who" id="name2" tabindex="-1"></p>
   <div class="number" id="number"></div>
   <p class="sr" id="announce" role="status"></p>
   <p class="hint" id="resulthint" hidden>テーブルの番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
@@ -77,7 +80,7 @@ button:disabled{cursor:default;opacity:.55}
  </div>
  <div id="join" hidden>
   <p class="event" data-ev></p>
-  <h1 style="font-size:24px">お名前を選んでください</h1>
+  <h1 style="font-size:24px" id="joinh" tabindex="-1">お名前を選んでください</h1>
   <p class="lead" style="margin-bottom:16px">ご自身のお名前をタップしてください。</p>
   <p class="err" id="joinerr" role="alert" hidden></p>
   <label class="sr" for="joinsearch">お名前で絞り込み</label>
@@ -98,7 +101,7 @@ button:disabled{cursor:default;opacity:.55}
  </div>
  <div id="fixed" hidden>
   <p class="event" data-ev></p>
-  <h1 id="fixedname"></h1>
+  <h1 id="fixedname" tabindex="-1"></h1>
   <p class="lead">お席はご案内します。<br>くじを引く必要はありません。</p>
  </div>
 </main>
@@ -119,37 +122,77 @@ button:disabled{cursor:default;opacity:.55}
   <p class="current" id="drinkcurrent"></p>
  </div>
 </section>
+<section class="card" id="mylinkbox" hidden>
+ <p class="hint" style="margin:0 0 10px">このスマホでもう一度開くときは、同じQRコードを読み取るか、下の「自分専用のページ」を開いてブックマーク（ホーム画面に追加）しておくと確実です。</p>
+ <a class="linkbtn" id="mylink" target="_top" rel="noopener">自分専用のページを開く</a>
+</section>
 <button class="switch" id="switchperson" hidden>ほかの方の受付をする（このスマホで続けて選ぶ）</button>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
 const UNDECIDED='未定';
 const reduced=()=>{try{return window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}};
-const clean=t=>String(t==null?'':t).normalize('NFKC').trim().replace(/\s+/g,' ');
-let token='',view=null,rolling=null,drawing=false,saving=false,otherOpen=false;
+const clean=t=>String(t==null?'':t).replace(/[​-‍⁠﻿­]/g,'').normalize('NFKC').trim().replace(/\s+/g,' ');
+let token='',view=null,rolling=null,replayTimer=null,drawing=false,saving=false,otherOpen=false;
 let joinCode='',joinPeople=[],picked=null,claiming=false;
+// 表示している人が変わるたびに増やします。古い人あての返事が遅れて届いても、画面を上書きしないようにするためです
+let gen=0;
 
 const NET_ERR='通信に失敗しました。電波の良い場所で、もう一度お試しください。';
-// サーバーのエラー文は「Error: 」などが付いて届くことがあるので取り除きます
-function errText(e){return String(e&&e.message?e.message:e||NET_ERR).replace(/^(?:Uncaught\s+)?(?:Error|Exception|ScriptError|TypeError):\s*/,'')||NET_ERR;}
-// 混み合っているとき（受付の一斉抽選など）は、少し待って自動でやり直します（抽選・ドリンク登録は何度呼んでも同じ結果になります）
+const TIMEOUT_MS=window.__SEKI_TIMEOUT_MS||20000; // 返事が来ないまま待たせない（テストでは短くできます）
+/*
+ * サーバーのエラー文を画面用に整えます。
+ * このアプリのサーバーが出すエラーは日本語です。英語だけのもの（NetworkError、Googleの一時的なエラー、タイムアウトなど）は
+ * 通信のエラーとして扱い、自動でやり直します。
+ */
+function errText(e){
+ let m=String(e&&e.message!=null?e.message:e==null?'':e).replace(/^(?:Uncaught\s+)?(?:[A-Za-z]*Error|Exception):\s*/,'').trim();
+ if(!m||!/[぀-ヿ一-鿿]/.test(m))return NET_ERR;
+ return m;
+}
+const transient=m=>m===NET_ERR||/混み合って/.test(m);
+// 呼び出しはすべて、何度呼んでも同じ結果になるように作ってあるので、通信エラー・混雑のときは少し待って自動でやり直します
 function run(fn,args,ok,ng,tries){
  tries=tries||0;
- const fail=m=>{if(/混み合って/.test(m)&&tries<3)setTimeout(()=>run(fn,args,ok,ng,tries+1),1200*(tries+1)+Math.floor(Math.random()*800));else ng(m);};
+ const g=gen;let done=false;
+ const timer=setTimeout(()=>{if(!done){done=true;fail(NET_ERR,true);}},TIMEOUT_MS);
+ const settle=f=>v=>{if(done)return;done=true;clearTimeout(timer);f(v);};
+ function fail(m,timedOut){
+  if(g!==gen)return; // 別の人の画面に変わっていたら何もしない
+  if(transient(m)&&!timedOut&&tries<3)setTimeout(()=>{if(g===gen)run(fn,args,ok,ng,tries+1);},1200*(tries+1)+Math.floor(Math.random()*800));
+  else ng(m);
+ }
  try{
-  let r=google.script.run.withSuccessHandler(ok).withFailureHandler(e=>fail(errText(e)));
+  const r=google.script.run.withSuccessHandler(settle(v=>{if(g===gen)ok(v);})).withFailureHandler(settle(e=>fail(errText(e))));
   r[fn].apply(r,args);
- }catch(e){ng(NET_ERR);}
+ }catch(e){settle(()=>fail(NET_ERR))();}
 }
 function show(id){
  for(const s of ['loading','bad','intro','result','fixed','join','confirm'])$(s).hidden=s!==id;
- // 共通QRで開いたときは、同じスマホで別の方を受付できるようにします（スマホを持っていない方の代わりなど）
- $('switchperson').hidden=!(joinCode&&token&&(id==='intro'||id==='result'||id==='fixed'));
+ syncSwitch(id);
 }
-function bad(msg){stopRoll();show('bad');$('badmsg').textContent=msg||'QRコードが無効です。受付にお声がけください。';$('drinkbox').hidden=true;}
+let shown='loading';
+function syncSwitch(id){
+ if(id)shown=id;
+ const person=joinCode&&token&&(shown==='intro'||shown==='result'||shown==='fixed');
+ // 共通QRで開いたときは、同じスマホで別の方を受付できるようにします（スマホを持っていない方の代わりなど）
+ $('switchperson').hidden=!person;
+ $('switchperson').disabled=drawing||saving;
+ const link=person&&view&&view.link;
+ $('mylinkbox').hidden=!link;
+ if(link)$('mylink').href=view.link;
+}
+function focusEl(el){if(el&&!el.hidden){try{el.focus({preventScroll:true});}catch(e){}}}
+function bad(msg){gen++;resetPerson();show('bad');$('badmsg').textContent=msg||'QRコードが無効です。受付にお声がけください。';$('drinkbox').hidden=true;}
+// 前の方の入力・メッセージ・演出を片付けます（共通QRで次の方に替わるとき）
+function resetPerson(){
+ stopRoll();drawing=false;saving=false;claiming=false;
+ otherOpen=false;$('otherinput').value='';msg('','');syncOther();
+ $('drawerr').hidden=true;$('draw').disabled=false;$('draw').textContent='くじを引く';
+}
 // 個別のトークンが使えなくなったとき（幹事がQRを作り直した・受付をやり直した）。共通QRなら名前選びに戻ります
 function badToken(m){
- if(joinCode){stopRoll();remember('');joinLoad('このスマホでの受付は取り消されました。もう一度お名前を選んでください。');}
+ if(joinCode){forget(token);joinLoad('このスマホでの受付は取り消されました。もう一度お名前を選んでください。');}
  else bad(m);
 }
 function setCommon(v){
@@ -168,7 +211,10 @@ function showNumber(text,isRolling){
  if(!isRolling){const small=document.createElement('small');small.textContent='番';n.append(small);}
  n.className='number'+(isRolling?' rolling':(reduced()?'':' pop'));
 }
-function stopRoll(){if(rolling){clearInterval(rolling);rolling=null;}}
+function stopRoll(){
+ if(rolling){clearInterval(rolling);rolling=null;}
+ if(replayTimer){clearTimeout(replayTimer);replayTimer=null;}
+}
 function startRoll(top){
  stopRoll();$('announce').textContent='抽選しています';
  top=Math.max(top||0,20);
@@ -181,91 +227,124 @@ function showSeat(v){
  $('announce').textContent=v.name+' さんのお席は '+v.seat+'番 です。';
  $('resulthint').hidden=false;$('again').hidden=false;
 }
+
 /* ---- 共通QR（全員同じQR）：名前を選ぶ ---- */
-// 選んだ方のトークンはこのスマホに覚えておき、同じQRをもう一度読み取ったときに名前選びを省きます
-const storeKey=()=>'sekikuji.join.'+joinCode;
-function remembered(){try{return localStorage.getItem(storeKey())||'';}catch(e){return '';}}
-function remember(t){try{if(t)localStorage.setItem(storeKey(),t);else localStorage.removeItem(storeKey());}catch(e){}}
+// 受付した方のトークンと、このスマホの確認キーを覚えておきます（共通QRを作り直しても使えるよう、QRごとには分けません）
+const TOKEN_KEY='sekikuji.join.token',DEVICE_KEY='sekikuji.device';
+function store(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);return true;}catch(e){return false;}}
+function load1(k){try{return localStorage.getItem(k)||'';}catch(e){return '';}}
+function remembered(){return load1(TOKEN_KEY);}
+function remember(t){store(TOKEN_KEY,t);}
+function forget(t){if(!t||remembered()===t)remember('');}
+let memDevice='';
+function deviceKey(){
+ let k=load1(DEVICE_KEY);
+ if(/^[A-Za-z0-9]{16,64}$/.test(k))return k;
+ if(!memDevice){
+  const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',a=new Uint8Array(24);
+  (window.crypto||window.msCrypto).getRandomValues(a);
+  memDevice=Array.from(a,x=>c[x%62]).join('');
+ }
+ store(DEVICE_KEY,memDevice);
+ return memDevice;
+}
 function joinStart(){
  const t=remembered();
  if(t){
   token=t;show('loading');
   // 通信エラーのときは覚えたトークンを消さずに「もう一度読み込む」を出します
-  run('participantGet',[t],v=>render(v,true),m=>{if(/QRコード/.test(m)){remember('');token='';joinLoad('このスマホでの受付は取り消されました。もう一度お名前を選んでください。');}else bad(m);});
+  run('participantGet',[t],v=>render(v,true),m=>{if(/QRコード/.test(m)){forget(t);token='';joinLoad('このスマホでの受付は取り消されました。もう一度お名前を選んでください。');}else bad(m);});
  }else joinLoad();
 }
-function joinLoad(msg){
- token='';view=null;show('loading');$('drinkbox').hidden=true;
- run('joinList',[joinCode],r=>{
+function joinLoad(message){
+ gen++;resetPerson();
+ token='';view=null;picked=null;show('loading');$('drinkbox').hidden=true;
+ run('joinList',[joinCode,deviceKey()],r=>{
   joinPeople=r.people||[];
   document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=r.event||'';e.hidden=!r.event;});
   show('join');renderJoin();
-  const e=$('joinerr');e.textContent=msg||'';e.hidden=!msg;
+  const e=$('joinerr');e.textContent=message||'';e.hidden=!message;
+  focusEl(message?e:$('joinh'));
  },m=>bad(m));
 }
+// 絞り込み用：空白を無視し、カタカナはひらがなに、英字は小文字にそろえます
+function norm(t){return clean(t).replace(/\s/g,'').toLowerCase().replace(/[ァ-ヶ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));}
 function renderJoin(){
- const q=clean($('joinsearch').value).toLowerCase();
- const hit=joinPeople.filter(p=>!q||clean(p.name).toLowerCase().includes(q));
- // まだ受付していない方を先に、受付済みの方は後ろに（押せない状態で）並べます
- const list=hit.filter(p=>!p.claimed).concat(hit.filter(p=>p.claimed));
+ const q=norm($('joinsearch').value);
+ const hit=joinPeople.filter(p=>!q||norm(p.name).includes(q));
+ // このスマホで受付した方 → まだの方 → ほかのスマホで受付済みの方（押せない）の順に並べます
+ const list=hit.filter(p=>p.mine).concat(hit.filter(p=>!p.claimed),hit.filter(p=>p.claimed&&!p.mine));
  const root=$('joinlist'),items=[];
  for(const p of list){
   const b=document.createElement('button');b.type='button';
   const n=document.createElement('span');n.textContent=p.name;b.append(n);
-  if(p.claimed){const t=document.createElement('span');t.className='tag';t.textContent='受付済み';b.append(t);b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
-  else b.onclick=()=>pick(p);
+  if(p.claimed){
+   const t=document.createElement('span');t.className='tag';t.textContent=p.mine?'このスマホで受付済み':'受付済み';b.append(t);
+   if(p.mine){b.onclick=()=>{picked=p;claim();};b.setAttribute('aria-label',p.name+'（このスマホで受付済み。押すと開きます）');}
+   else{b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
+  }else b.onclick=()=>pick(p);
   items.push(b);
  }
  if(!items.length){const e=document.createElement('p');e.className='empty';e.textContent=joinPeople.length?'該当するお名前がありません。':'名簿がまだ登録されていません。受付にお声がけください。';items.push(e);}
  root.replaceChildren(...items);
 }
+let confirmTimer=null;
 function pick(p){
  picked=p;$('confirmname').textContent=p.name+' さん';
- $('confirmerr').hidden=true;$('confirmyes').disabled=false;$('confirmno').disabled=false;
- show('confirm');$('confirmyes').focus();
+ $('confirmerr').hidden=true;$('confirmno').disabled=false;
+ // 名前をすばやく2回タップしたとき、2回目が「はい、自分です」に当たって確認なしで受付されないよう、少しだけ押せなくします
+ const yes=$('confirmyes');yes.disabled=true;yes.textContent='はい、自分です';
+ clearTimeout(confirmTimer);confirmTimer=setTimeout(()=>{if(!claiming)yes.disabled=false;},500);
+ show('confirm');focusEl($('confirmname').previousElementSibling||$('confirmname'));
 }
 function claim(){
  if(claiming||!picked)return;
  claiming=true;$('confirmyes').disabled=true;$('confirmno').disabled=true;$('confirmyes').textContent='受付しています…';
- run('joinClaim',[joinCode,picked.id],r=>{
+ const who=picked;
+ run('joinClaim',[joinCode,who.id,deviceKey()],r=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';
-  token=r.token;remember(r.token);picked=null;
+  gen++;token=r.token;remember(r.token);picked=null;
   render(r.view,true);
  },m=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
-  if(m===NET_ERR||/混み合って/.test(m)){$('confirmyes').disabled=false;const e=$('confirmerr');e.textContent=m;e.hidden=false;return;}
+  if(transient(m)){
+   if(shown!=='confirm'){joinLoad(m);return;}
+   $('confirmyes').disabled=false;const e=$('confirmerr');e.textContent=m;e.hidden=false;return;
+  }
   if(/受付済み/.test(m)||/該当する方/.test(m)){$('joinsearch').value='';joinLoad(m);return;}
   bad(m);
  });
 }
 $('joinsearch').oninput=renderJoin;
 $('confirmyes').onclick=claim;
-$('confirmno').onclick=()=>{picked=null;show('join');};
+$('confirmno').onclick=()=>{picked=null;$('joinerr').hidden=true;joinLoad();};
 $('switchperson').onclick=()=>{
  if(drawing||saving)return;
- stopRoll();remember('');$('joinsearch').value='';msg('','');otherOpen=false;$('otherinput').value='';
- joinLoad();
+ // 覚えているトークンは、次の方の受付が済むまで消しません（途中でやめても、この方の画面に戻れるように）
+ $('joinsearch').value='';joinLoad();
 };
 
 function load(){
  show('loading');$('drinkbox').hidden=true;
- run('participantGet',[token],v=>render(v,true),msg=>bad(msg));
+ run('participantGet',[token],v=>render(v,true),m=>bad(m));
 }
 // 画面全体をサーバーの状態から描き直す
 function render(v,full){
  view=v;setCommon(v);
  if(full){
-  if(v.kind==='fixed')show('fixed');
-  else if(v.seat!=null)showSeat(v);
-  else{show('intro');$('draw').disabled=false;$('draw').textContent='くじを引く';$('drawerr').hidden=true;}
+  stopRoll();
+  if(v.kind==='fixed'){show('fixed');focusEl($('fixedname'));}
+  else if(v.seat!=null){showSeat(v);focusEl($('name2'));}
+  else{show('intro');$('draw').disabled=false;$('draw').textContent='くじを引く';$('drawerr').hidden=true;focusEl($('name'));}
  }
  renderDrink(v.kind==='fixed'||v.seat!=null);
+ syncSwitch();
 }
 
 /* ---- くじ ---- */
 function draw(){
  if(drawing||!view)return;
- drawing=true;
+ drawing=true;syncSwitch();
  const btn=$('draw');btn.disabled=true;$('drawerr').hidden=true;
  const t0=Date.now(),min=reduced()||document.hidden?0:1500;
  let got=null,timer=null;
@@ -274,35 +353,36 @@ function draw(){
   show('result');$('resulthint').hidden=true;$('again').hidden=true;
   startRoll(view.seatsLeft);
  }else btn.textContent='抽選しています…';
+ const g=gen;
  const finish=()=>{
-  if(!got)return;
-  drawing=false;view=got;setCommon(got);
-  if(got.kind==='fixed'){stopRoll();show('fixed');}
-  else showSeat(got);
-  renderDrink(true);
+  if(!got||g!==gen)return;
+  drawing=false;
+  render(got,true);
+  focusEl($('again').hidden?$('fixedname'):$('again'));
  };
  run('participantDraw',[token],v=>{
   got=v;
   const wait=min-(Date.now()-t0);
   if(wait>0)timer=setTimeout(finish,wait);else finish();
- },msg=>{
+ },m=>{
   if(timer)clearTimeout(timer);
-  drawing=false;stopRoll();$('announce').textContent='';show('intro');
-  const showErr=()=>{const e=$('drawerr');e.textContent=msg;e.hidden=false;btn.disabled=false;btn.textContent='もう一度くじを引く';};
+  stopRoll();$('announce').textContent='';show('intro');
+  const showErr=()=>{const e=$('drawerr');e.textContent=m;e.hidden=false;btn.disabled=false;btn.textContent='もう一度くじを引く';};
   showErr();
   // 幹事が区分を変えた・QRを作り直した などサーバー側が変わったときは、最新の状態を読み直して画面を切り替えます
-  if(msg!==NET_ERR&&!/混み合って/.test(msg)){
+  if(!transient(m)){
    btn.disabled=true;
-   run('participantGet',[token],v=>{render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m=>{if(/QRコード/.test(m))badToken(m);else btn.disabled=false;});
-  }
+   run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else btn.disabled=false;});
+  }else{drawing=false;syncSwitch();}
  });
 }
 function replay(){
- if(!view||view.seat==null||rolling)return;
+ if(!view||view.seat==null||rolling||drawing)return;
  if(reduced()||document.hidden){showSeat(view);return;}
  $('again').hidden=true;
  startRoll(view.seat);
- setTimeout(()=>showSeat(view),1500);
+ const g=gen;
+ replayTimer=setTimeout(()=>{replayTimer=null;if(g!==gen||!view)return;if(view.seat!=null&&shown==='result')showSeat(view);else render(view,true);},1500);
 }
 
 /* ---- ドリンク ---- */
@@ -329,7 +409,11 @@ function renderDrink(visible){
  o.textContent=isOther(d)?'その他：'+d:'その他（入力）';
  o.className='wide'+(isOther(d)?' sel':'');o.setAttribute('aria-pressed',String(isOther(d)));
  o.setAttribute('aria-expanded',String(otherOpen));
- o.onclick=()=>{otherOpen=!otherOpen;syncOther();if(otherOpen){const i=$('otherinput');if(!i.value&&isOther(view.drink))i.value=view.drink;i.focus();}};
+ o.onclick=()=>{
+  otherOpen=!otherOpen;syncOther();
+  if(otherOpen){const i=$('otherinput');if(!i.value&&isOther(view.drink))i.value=view.drink;i.focus();}
+  else if($('drinkmsg').classList.contains('ng'))msg('',''),renderDrink(true); // 閉じたら入力エラーの表示も消す
+ };
  items.push(o);
  const l=document.createElement('button');l.type='button';l.textContent='あとで決める（未定）';
  l.className='wide later'+(d===UNDECIDED?' sel':'');l.setAttribute('aria-pressed',String(d===UNDECIDED));
@@ -347,6 +431,7 @@ function syncOther(){
 }
 function setBusy(b){
  document.querySelectorAll('#drinkbox button,#drinkbox input').forEach(e=>e.disabled=b);
+ syncSwitch();
 }
 function msg(text,cls,keep){
  const m=$('drinkmsg');m.textContent=text;m.className='msg'+(cls?' '+cls:'');
@@ -359,15 +444,20 @@ function save(drink){
  if(drink.length>30){msg('ドリンク名は30文字以内で入力してください。','ng',true);return;}
  saving=true;setBusy(true);msg('保存しています…','',true);
  run('participantSetDrink',[token,drink],v=>{
-  saving=false;view=v;
+  saving=false;
+  // 幹事が席を空きに戻した・区分を変えた などで画面と違っていたら、画面全体を描き直します
+  const changed=!view||v.kind!==view.kind||v.seat!==view.seat;
   if(!isOther(v.drink))$('otherinput').value='';
   otherOpen=false;
   msg((v.drink===UNDECIDED?'「未定」':'「'+v.drink+'」')+'で登録しました。変更もできます。','ok',true);
-  renderDrink(true);
+  render(v,changed);
  },m=>{
-  saving=false;setBusy(false);msg(m,'ng',true);
-  if(/締め切/.test(m))run('participantGet',[token],v=>{render(v,false);},()=>{});
-  else if(/QRコード/.test(m))run('participantGet',[token],v=>{render(v,true);},badToken);
+  // 締め切り・QR無効のときは、最新の状態を読み直すまで押せないままにします
+  const reload=/締め切/.test(m)||/QRコード/.test(m);
+  if(!reload){saving=false;setBusy(false);}
+  msg(m,'ng',true);
+  if(/締め切/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat);},()=>{saving=false;setBusy(false);});
+  else if(/QRコード/.test(m))run('participantGet',[token],v=>{saving=false;render(v,true);},m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else setBusy(false);});
  });
 }
 $('otherform').onsubmit=e=>{e.preventDefault();save($('otherinput').value);};
