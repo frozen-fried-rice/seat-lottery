@@ -414,7 +414,7 @@ test('利用者入力は書式なしテキストで保存され、数式・数�
   assert.equal(st.settings.event, '=1+2');
   assert.deepEqual(st.settings.drinks, ['=A1', '100', 'ビール']);
   const r = rows();
-  assert.equal(r[1][2], '=1+1'); assert.equal(r[5][2], '0123'); assert.equal(typeof r[7][2], 'string');
+  assert.ok(r[1][2] === "'=1+1" || r[1][2] === '=1+1', '「=」で始まる文字は先頭に「\'」を付けて文字として保存'); assert.equal(r[5][2], '0123'); assert.equal(typeof r[7][2], 'string');
   // 書式: テキスト列は '@'、席番号列は数値
   assert.equal(sh.getRange(2, 3).getNumberFormat(), '@');
   assert.equal(sh.getRange(2, 6).getNumberFormat(), '@');
@@ -775,7 +775,8 @@ test('showAdminUrl: UI が無い文脈では戻り値なし（クライアント
   assert.equal(callServer(ctx, 'showAdminUrl', []), undefined);
   assert.equal(ctx.showAdminUrl(), undefined);
   assert.equal(ctx.__mock.ui.dialogs.length, 0);
-  assert.ok(ctx.__mock.logs.some(l => l.includes('?admin=' + key)), 'エディタから実行した幹事はログで確認できる');
+  assert.ok(!ctx.__mock.logs.some(l => l.includes(key)), '合言葉はログにも出さない');
+  assert.ok(ctx.__mock.logs.some(l => l.includes('幹事画面のURLを表示')), '確認のしかたを案内する');
 });
 
 test('showAdminUrl: UI があればリンク付きダイアログ、未デプロイなら案内、baseUrl を優先', () => {
@@ -1480,6 +1481,41 @@ test('回帰3: 行をコピーして元の行のお名前を打ち直しても�
   assert.equal(new Set(ids).size, ids.length, 'IDが重ならない');
   const v = call('participantGet', st.people.find(p => p.name === 'A' && p.token === a.token) ? a.token : st.people[0].token);
   assert.equal(v.name, 'A');
+});
+
+
+/* ================= バグ修正の回帰テスト（第4回 総点検） ================= */
+test('回帰4: 想定外のエラー（Googleの一時的な不調など）は「混み合っています」として返す。このアプリのエラーはそのまま', () => {
+  const { ctx, add, call } = fresh();
+  const [p] = add(['A']).state.people;
+  ctx.__mock.run(`(function(){ const o = SpreadsheetApp.flush; SpreadsheetApp.flush = function(){ SpreadsheetApp.flush = o; throw new Error('サーバー エラーが発生しました。しばらくしてからもう一度試してください。'); }; })()`);
+  throwsMsg(() => call('participantDraw', p.token), /混み合っています/);
+  throwsMsg(() => call('participantGet', 'AAAAAAAAAAAAAAAAAAAA'), ERR_TOKEN);
+});
+
+test('回帰4: 初期設定が済んでいれば setup はロックを取らない（だれが呼んでも参加者の操作を妨げない）', () => {
+  const { ctx } = fresh();
+  const L = ctx.__mock.backend.lock, w = L.waits;
+  for (let i = 0; i < 5; i++) callServer(ctx, 'setup', []);
+  assert.equal(L.waits, w);
+});
+
+test('回帰4: QR用URLは、合言葉を付けてもQRコードに収まる長さまで', () => {
+  const { admin } = fresh();
+  throwsMsg(() => admin('adminSaveSettings', { baseUrl: 'https://example.com/' + 'a'.repeat(200) }), /190文字以内/);
+  assert.ok(admin('adminSaveSettings', { baseUrl: 'https://example.com/' + 'a'.repeat(170) }).settings.appUrl.length <= 190);
+});
+
+test('回帰4: 「=」「+」「-」「@」で始まる名前・ドリンク・会の名前は、読み書きしても元の文字のまま', () => {
+  const { add, admin, call } = fresh();
+  const [p] = add(['=1+1', '-山田', '@home', '+81']).state.people;
+  call('participantSetDrink', p.token, '=HYPERLINK("x")');
+  admin('adminSaveSettings', { event: '-送別会-', drinks: ['=A1', 'ビール'] });
+  const st = admin('adminGetState');
+  assert.deepEqual(st.people.map(x => x.name), ['=1+1', '-山田', '@home', '+81']);
+  assert.equal(st.people[0].drink, '=HYPERLINK("x")');
+  assert.equal(st.settings.event, '-送別会-');
+  assert.deepEqual(st.settings.drinks, ['=A1', 'ビール']);
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);

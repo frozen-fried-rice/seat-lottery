@@ -538,7 +538,7 @@ async function step(name, fn) {
       assert.equal(state().people.find(p => p.id === who.id).claimedAt, null);
       // 1台目は取り消されたことを知らせて、名前の一覧に戻る
       await ph.reload();
-      await ph.locator('#joinerr').filter({ hasText: '取り消されました' }).waitFor();
+      await ph.locator('#joinerr').filter({ hasText: '使えなくなりました' }).waitFor();
       await ph2.reload();
       await ph2.locator('#joinlist button', { hasText: who.name }).click();
       await ph2.click('#confirmyes');
@@ -630,7 +630,7 @@ async function step(name, fn) {
       await pg.fill('#otherinput', '前の人のメモ');
       callServer(ctx, 'adminUpdatePerson', [KEY, id1, { releaseClaim: true }]);
       await pg.locator('#drinklist button', { hasText: /^ビール$/ }).click();
-      await pg.locator('#joinerr').filter({ hasText: '取り消されました' }).waitFor();
+      await pg.locator('#joinerr').filter({ hasText: '使えなくなりました' }).waitFor();
       await pg.locator('#joinlist button', { hasText: '障害 二郎' }).click();
       await pg.waitForTimeout(600);
       await pg.click('#confirmyes');
@@ -752,7 +752,7 @@ async function step(name, fn) {
       const id = state().people.find(p => p.name === '回帰 春子').id;
       callServer(ctx, 'adminUpdatePerson', [KEY, id, { releaseClaim: true }]);
       await pg.locator('#drinklist button', { hasText: /^コーラ$/ }).click();
-      await pg.locator('#joinerr').filter({ hasText: '取り消されました' }).waitFor();
+      await pg.locator('#joinerr').filter({ hasText: '使えなくなりました' }).waitFor();
       assert.equal(await pg.inputValue('#joinsearch'), '');
       assert.ok((await pg.locator('#joinlist button').count()) > 2);
       await pg.context().close();

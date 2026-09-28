@@ -9,7 +9,7 @@ const SHEET_PEOPLE_ = '参加者', SHEET_SETTINGS_ = '設定';
 const HEADERS_ = ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時', '受付確認キー'];
 const COL_SEAT_ = 5; // 席番号の列（ここだけ数値。ほかの列は書式なしテキスト）
 const DEFAULT_DRINKS_ = ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'];
-const DEFAULT_SEATS_ = 27, MAX_SEATS_ = 99, MAX_PEOPLE_ = 200, MAX_NAME_ = 60, MAX_DRINK_ = 30, MAX_DRINKS_ = 20, MAX_EVENT_ = 40, MAX_URL_ = 300;
+const DEFAULT_SEATS_ = 27, MAX_SEATS_ = 99, MAX_PEOPLE_ = 200, MAX_NAME_ = 60, MAX_DRINK_ = 30, MAX_DRINKS_ = 20, MAX_EVENT_ = 40, MAX_URL_ = 190; // QRコード（型番10・誤り訂正M）に入るのは213バイトまで。?t=＋合言葉20文字を足しても収まる長さ
 const UNDECIDED_ = '未定', TZ_ = 'Asia/Tokyo';
 const ERR_TOKEN_ = 'QRコードが無効です。受付にお声がけください。';
 const ERR_KEY_ = '幹事用の合言葉が違います。';
@@ -46,9 +46,40 @@ function infoPage_() {
     '</style></head><body><main><h1>席くじ</h1><p>受付でお渡ししたQRコードを読み取ってください。<br>うまくいかないときは受付にお声がけください。</p></main></body></html>';
 }
 
+/* ================= 画面から呼ぶ関数（入口） =================
+ * 実際の処理は「〜Impl_」にあります。ここでは、想定外のエラー（Googleの一時的な不調など）を
+ * 「混み合っています」に置き換えて返します（画面は自動でやり直し、利用者に技術的な文を見せないため）。
+ * このアプリが出すエラー（appErr_ で作ったもの）はそのまま返します。
+ */
+function participantGet(token) { return api_(function () { return participantGetImpl_(token); }); }
+function participantDraw(token) { return api_(function () { return participantDrawImpl_(token); }); }
+function participantSetDrink(token, drink) { return api_(function () { return participantSetDrinkImpl_(token, drink); }); }
+function joinList(code, claimKey) { return api_(function () { return joinListImpl_(code, claimKey); }); }
+function joinClaim(code, id, claimKey) { return api_(function () { return joinClaimImpl_(code, id, claimKey); }); }
+function adminGetState(key) { return api_(function () { return adminGetStateImpl_(key); }); }
+function adminAddPeople(key, names, kind) { return api_(function () { return adminAddPeopleImpl_(key, names, kind); }); }
+function adminUpdatePerson(key, id, patch) { return api_(function () { return adminUpdatePersonImpl_(key, id, patch); }); }
+function adminDeletePerson(key, id) { return api_(function () { return adminDeletePersonImpl_(key, id); }); }
+function adminDrawAll(key) { return api_(function () { return adminDrawAllImpl_(key); }); }
+function adminDrawOne(key, id) { return api_(function () { return adminDrawOneImpl_(key, id); }); }
+function adminSaveSettings(key, s) { return api_(function () { return adminSaveSettingsImpl_(key, s); }); }
+function adminReissueToken(key, id) { return api_(function () { return adminReissueTokenImpl_(key, id); }); }
+function adminResetJoinCode(key) { return api_(function () { return adminResetJoinCodeImpl_(key); }); }
+function adminReset(key, scope) { return api_(function () { return adminResetImpl_(key, scope); }); }
+
+function appErr_(msg) { const e = new Error(msg); e.app = true; return e; }
+function api_(fn) {
+  try { return fn(); }
+  catch (err) {
+    if (err && err.app) throw err;
+    console.error(err && err.stack ? err.stack : err);
+    throw appErr_(ERR_BUSY_);
+  }
+}
+
 /* ================= 参加者用 API ================= */
 
-function participantGet(token) {
+function participantGetImpl_(token) {
   const db = load_();
   const p = findByToken_(db, token);
   if (p.claimedAt) return participantView_(db, p);
@@ -67,10 +98,10 @@ function participantGet(token) {
  * 参加者の書き込みは、まずロックを取らずに読んでトークンを確かめます（でたらめなトークンでロックを占有されないように）。
  * 本当の確認と書き込みはロックの中でやり直し、変わった1行だけを書き込みます（受付が混み合ってもロックを短く保つため）。
  */
-function participantDraw(token) {
+function participantDrawImpl_(token) {
   checkTokenShape_(token);
   const pre = load_(), pp = findByToken_(pre, token);
-  if (pp.kind === 'fixed') throw new Error(ERR_FIXED_);
+  if (pp.kind === 'fixed') throw appErr_(ERR_FIXED_);
   if (pp.seat !== null && pp.claimedAt) return participantView_(pre, pp); // すでに席がある（2回押し・再読込）ならロック不要
   return withLock_(function () {
     const db = load_(true);
@@ -82,16 +113,16 @@ function participantDraw(token) {
   });
 }
 
-function participantSetDrink(token, drink) {
+function participantSetDrinkImpl_(token, drink) {
   checkTokenShape_(token);
   const pre = load_();
   findByToken_(pre, token);
-  if (!pre.settings.drinkOpen) throw new Error(ERR_CLOSED_);
+  if (!pre.settings.drinkOpen) throw appErr_(ERR_CLOSED_);
   const d = checkDrink_(drink);
   return withLock_(function () {
     const db = load_(true);
     const p = findByToken_(db, token);
-    if (!db.settings.drinkOpen) throw new Error(ERR_CLOSED_);
+    if (!db.settings.drinkOpen) throw appErr_(ERR_CLOSED_);
     p.drink = d;
     p.drinkAt = now_();
     if (!p.claimedAt) p.claimedAt = p.drinkAt;
@@ -108,7 +139,7 @@ function participantSetDrink(token, drink) {
  */
 
 /* claimKey（このスマホの確認キー）を渡すと、このスマホで受付した方に mine: true を付けます（受付の返事を受け取れなかったときに戻れるように） */
-function joinList(code, claimKey) {
+function joinListImpl_(code, claimKey) {
   const key = validClaimKey_(claimKey);
   let db = load_();
   checkJoin_(db, code);
@@ -127,18 +158,18 @@ function joinList(code, claimKey) {
  * claimKey はスマホ側で作るランダムな文字列です。受付の返事が通信の途中で失われても、
  * 同じスマホが同じ claimKey でやり直せば、同じ方として受付を続けられます（ほかのスマホは claimKey を知らないので選べません）。
  */
-function joinClaim(code, id, claimKey) {
+function joinClaimImpl_(code, id, claimKey) {
   const key = validClaimKey_(claimKey);
   const pre = load_();
   checkJoin_(pre, code);
   const pp = findById_(pre, id);
-  if (pp.claimedAt && !(key && pp.claimKey === key)) throw new Error(claimedMsg_(pp));
+  if (pp.claimedAt && !(key && pp.claimKey === key)) throw appErr_(claimedMsg_(pp));
   return withLock_(function () {
     const db = load_(true);
     checkJoin_(db, code);
     const p = findById_(db, id);
     if (p.claimedAt) {
-      if (!(key && p.claimKey === key)) throw new Error(claimedMsg_(p));
+      if (!(key && p.claimKey === key)) throw appErr_(claimedMsg_(p));
     } else {
       p.claimedAt = now_();
       p.claimKey = key || null;
@@ -150,7 +181,7 @@ function joinClaim(code, id, claimKey) {
 
 /* ================= 幹事用 API ================= */
 
-function adminGetState(key) {
+function adminGetStateImpl_(key) {
   checkKey_(key);
   let db = load_();
   // 読み込み時に直した箇所がある・共通QRコードがまだ無い（以前の版から更新した）ときは、ここで書き込んでおきます
@@ -158,9 +189,9 @@ function adminGetState(key) {
   return adminState_(db);
 }
 
-function adminAddPeople(key, names, kind) {
+function adminAddPeopleImpl_(key, names, kind) {
   checkKey_(key);
-  if (!Array.isArray(names)) throw new Error('お名前を入力してください。');
+  if (!Array.isArray(names)) throw appErr_('お名前を入力してください。');
   checkKind_(kind);
   return withLock_(function () {
     const db = load_(true);
@@ -178,15 +209,15 @@ function adminAddPeople(key, names, kind) {
       db.people.push(newPerson_(db, n, kind));
       added.push(n);
     });
-    if (!added.length) throw new Error('追加できる方がいませんでした。' + (skipped.length ? skipped.join('、') : 'お名前を入力してください。'));
+    if (!added.length) throw appErr_('追加できる方がいませんでした。' + (skipped.length ? skipped.join('、') : 'お名前を入力してください。'));
     save_(db);
     return { state: adminState_(db), added: added, skipped: skipped };
   });
 }
 
-function adminUpdatePerson(key, id, patch) {
+function adminUpdatePersonImpl_(key, id, patch) {
   checkKey_(key);
-  if (!patch || typeof patch !== 'object') throw new Error('変更する内容がありません。');
+  if (!patch || typeof patch !== 'object') throw appErr_('変更する内容がありません。');
   return withLock_(function () {
     const db = load_(true);
     const p = findById_(db, id);
@@ -207,7 +238,7 @@ function adminUpdatePerson(key, id, patch) {
   });
 }
 
-function adminDeletePerson(key, id) {
+function adminDeletePersonImpl_(key, id) {
   checkKey_(key);
   return withLock_(function () {
     const db = load_(true);
@@ -218,14 +249,14 @@ function adminDeletePerson(key, id) {
   });
 }
 
-function adminDrawAll(key) {
+function adminDrawAllImpl_(key) {
   checkKey_(key);
   return withLock_(function () {
     const db = load_(true);
     const targets = db.people.filter(function (p) { return p.kind === 'lottery' && p.seat === null; });
-    if (!targets.length) throw new Error('席が決まっていない方はいません。');
+    if (!targets.length) throw appErr_('席が決まっていない方はいません。');
     const free = freeSeats_(db);
-    if (!free.length) throw new Error('空いている席がありません。抽選席数を増やしてください。');
+    if (!free.length) throw appErr_('空いている席がありません。抽選席数を増やしてください。');
     shuffle_(free);
     shuffle_(targets); // 席が足りないとき、名簿の上の方の人から決まらないように順番もくじにします
     const at = now_();
@@ -240,7 +271,7 @@ function adminDrawAll(key) {
   });
 }
 
-function adminDrawOne(key, id) {
+function adminDrawOneImpl_(key, id) {
   checkKey_(key);
   return withLock_(function () {
     const db = load_(true);
@@ -249,32 +280,32 @@ function adminDrawOne(key, id) {
   });
 }
 
-function adminSaveSettings(key, s) {
+function adminSaveSettingsImpl_(key, s) {
   checkKey_(key);
-  if (!s || typeof s !== 'object') throw new Error('変更する内容がありません。');
+  if (!s || typeof s !== 'object') throw appErr_('変更する内容がありません。');
   return withLock_(function () {
     const db = load_(true), st = db.settings;
     if (s.seats !== undefined) {
       const n = typeof s.seats === 'string' && s.seats.trim() ? Number(s.seats) : s.seats;
-      if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_SEATS_) throw new Error('抽選席数は1〜' + MAX_SEATS_ + 'の整数で入力してください。');
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_SEATS_) throw appErr_('抽選席数は1〜' + MAX_SEATS_ + 'の整数で入力してください。');
       const maxSeat = db.people.concat(db.ghosts).reduce(function (m, p) { return p.seat !== null && p.seat > m ? p.seat : m; }, 0);
-      if (n < maxSeat) throw new Error('すでに' + maxSeat + '番の席が決まっているため、抽選席数を' + maxSeat + 'より少なくできません。');
+      if (n < maxSeat) throw appErr_('すでに' + maxSeat + '番の席が決まっているため、抽選席数を' + maxSeat + 'より少なくできません。');
       st.seats = n;
     }
     if (s.event !== undefined) {
-      if (typeof s.event !== 'string') throw new Error('会の名前を文字で入力してください。');
+      if (typeof s.event !== 'string') throw appErr_('会の名前を文字で入力してください。');
       const ev = tidy_(s.event);
-      if (ev.length > MAX_EVENT_) throw new Error('会の名前は' + MAX_EVENT_ + '文字以内で入力してください。');
+      if (ev.length > MAX_EVENT_) throw appErr_('会の名前は' + MAX_EVENT_ + '文字以内で入力してください。');
       st.event = ev;
     }
     if (s.drinks !== undefined) { st.drinks = checkMenu_(s.drinks); st.drinksRaw = st.drinks.join('\n'); }
     if (s.drinkOpen !== undefined) {
-      if (typeof s.drinkOpen !== 'boolean') throw new Error('ドリンクの受付の設定が正しくありません。');
+      if (typeof s.drinkOpen !== 'boolean') throw appErr_('ドリンクの受付の設定が正しくありません。');
       st.drinkOpen = s.drinkOpen;
     }
     if (s.baseUrl !== undefined) st.baseUrl = checkBaseUrl_(s.baseUrl);
     if (s.joinOpen !== undefined) {
-      if (typeof s.joinOpen !== 'boolean') throw new Error('共通QRコードの設定が正しくありません。');
+      if (typeof s.joinOpen !== 'boolean') throw appErr_('共通QRコードの設定が正しくありません。');
       st.joinOpen = s.joinOpen;
     }
     saveSettings_(db);
@@ -284,7 +315,7 @@ function adminSaveSettings(key, s) {
   });
 }
 
-function adminReissueToken(key, id) {
+function adminReissueTokenImpl_(key, id) {
   checkKey_(key);
   return withLock_(function () {
     const db = load_(true);
@@ -297,7 +328,7 @@ function adminReissueToken(key, id) {
 }
 
 /* 共通QRコードを作り直します（古い共通QRは使えなくなります。受付済みの方のスマホはそのまま使えます）。 */
-function adminResetJoinCode(key) {
+function adminResetJoinCodeImpl_(key) {
   checkKey_(key);
   return withLock_(function () {
     const db = load_(true);
@@ -309,9 +340,9 @@ function adminResetJoinCode(key) {
   });
 }
 
-function adminReset(key, scope) {
+function adminResetImpl_(key, scope) {
   checkKey_(key);
-  if (scope !== 'seats' && scope !== 'drinks' && scope !== 'all') throw new Error('リセットする範囲が正しくありません。');
+  if (scope !== 'seats' && scope !== 'drinks' && scope !== 'all') throw appErr_('リセットする範囲が正しくありません。');
   return withLock_(function () {
     const db = load_(true);
     if (scope === 'all') {
@@ -332,6 +363,14 @@ function adminReset(key, scope) {
 /* ================= エディタ・スプレッドシートのメニュー ================= */
 
 function setup() {
+  // すでに初期設定が済んでいれば何もしません（誰が呼んでもロックを取らないので、参加者の操作を妨げません）
+  try {
+    const props0 = PropertiesService.getScriptProperties();
+    if (props0.getProperty('ADMIN_KEY') && props0.getProperty('SHEET_ID')) {
+      const ss0 = spreadsheet_();
+      if (ss0.getSheetByName(SHEET_PEOPLE_) && settingsHas_(ss0, 'sheetVersion')) return;
+    }
+  } catch (err) { /* 下でロックを取ってやり直します */ }
   withLock_(function () {
     const props = PropertiesService.getScriptProperties();
     let ss = null;
@@ -339,7 +378,7 @@ function setup() {
     const id = props.getProperty('SHEET_ID');
     if (!ss && id) {
       // 保存先が一時的に開けないだけのこともあるので、新しく作り直さずにエラーにします（名簿が切り離されないように）。
-      try { ss = SpreadsheetApp.openById(id); } catch (err) { throw new Error('保存先のスプレッドシート（SHEET_ID）を開けませんでした。少し待ってから、もう一度お試しください。'); }
+      try { ss = SpreadsheetApp.openById(id); } catch (err) { throw appErr_('保存先のスプレッドシート（SHEET_ID）を開けませんでした。少し待ってから、もう一度お試しください。'); }
     }
     if (!ss) ss = SpreadsheetApp.create('席くじ');
     if (props.getProperty('SHEET_ID') !== ss.getId()) props.setProperty('SHEET_ID', ss.getId());
@@ -370,7 +409,8 @@ function showAdminUrl() {
   const url = key && base ? base + '?admin=' + key : '';
   const ui = getUi_();
   if (!ui) {
-    Logger.log(!key ? '先に setup（初期設定）を実行してください。' : !base ? '先にWebアプリとしてデプロイしてください。' : '幹事画面のURL: ' + url);
+    // 画面の無いところ（エディタから実行など）では、合言葉入りのURLはログに出さず、見つけ方だけを案内します
+    Logger.log(!key ? '先に setup（初期設定）を実行してください。' : !base ? '先にWebアプリとしてデプロイしてください。' : 'スプレッドシートのメニュー「席くじ」→「幹事画面のURLを表示」で確認してください。');
     return;
   }
   if (!key) { ui.alert('先にメニュー『席くじ』→『初期設定』を実行してください。'); return; }
@@ -428,7 +468,7 @@ function persistIfDirty_(db) {
 
 function withLock_(fn) {
   const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch (err) { throw new Error(ERR_BUSY_); }
+  try { lock.waitLock(10000); } catch (err) { throw appErr_(ERR_BUSY_); }
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
@@ -460,58 +500,58 @@ function isAdminKey_(key) {
   const k = adminKey_();
   return typeof key === 'string' && key.length > 0 && k.length > 0 && key === k;
 }
-function checkKey_(key) { if (!isAdminKey_(key)) throw new Error(ERR_KEY_); }
-function checkKind_(kind) { if (kind !== 'lottery' && kind !== 'fixed') throw new Error('区分は「抽選」か「固定」を選んでください。'); }
+function checkKey_(key) { if (!isAdminKey_(key)) throw appErr_(ERR_KEY_); }
+function checkKind_(kind) { if (kind !== 'lottery' && kind !== 'fixed') throw appErr_('区分は「抽選」か「固定」を選んでください。'); }
 function checkJoin_(db, code) {
   const c = db.settings.joinCode;
-  if (typeof code !== 'string' || !/^[A-Za-z0-9]{8,64}$/.test(code) || !c || code !== c) throw new Error(ERR_JOIN_);
-  if (!db.settings.joinOpen) throw new Error(ERR_JOIN_CLOSED_);
+  if (typeof code !== 'string' || !/^[A-Za-z0-9]{8,64}$/.test(code) || !c || code !== c) throw appErr_(ERR_JOIN_);
+  if (!db.settings.joinOpen) throw appErr_(ERR_JOIN_CLOSED_);
 }
 function claimedMsg_(p) { return '「' + p.name + '」さんは、すでに受付済みです。ご本人の場合は、最初に使ったスマホで同じQRコードを読み取るか、受付にお声がけください。'; }
-function checkTokenShape_(token) { if (typeof token !== 'string' || !/^[A-Za-z0-9]{8,64}$/.test(token)) throw new Error(ERR_TOKEN_); }
+function checkTokenShape_(token) { if (typeof token !== 'string' || !/^[A-Za-z0-9]{8,64}$/.test(token)) throw appErr_(ERR_TOKEN_); }
 
 function checkName_(db, name, exceptId) {
-  if (typeof name !== 'string') throw new Error('お名前を入力してください。');
+  if (typeof name !== 'string') throw appErr_('お名前を入力してください。');
   const n = tidy_(name);
-  if (!n) throw new Error('お名前を入力してください。');
-  if (n.length > MAX_NAME_) throw new Error('お名前は' + MAX_NAME_ + '文字以内で入力してください。');
+  if (!n) throw appErr_('お名前を入力してください。');
+  if (n.length > MAX_NAME_) throw appErr_('お名前は' + MAX_NAME_ + '文字以内で入力してください。');
   const c = clean_(n);
-  if (db.people.some(function (p) { return p.id !== exceptId && clean_(p.name) === c; })) throw new Error('「' + n + '」はすでに名簿にあります。区別できる表記にしてください。');
+  if (db.people.some(function (p) { return p.id !== exceptId && clean_(p.name) === c; })) throw appErr_('「' + n + '」はすでに名簿にあります。区別できる表記にしてください。');
   return n;
 }
 
 function checkDrink_(drink) {
-  if (typeof drink !== 'string') throw new Error('ドリンクを選んでください。');
+  if (typeof drink !== 'string') throw appErr_('ドリンクを選んでください。');
   const d = clean_(drink);
-  if (!d) throw new Error('ドリンクを選んでください。');
-  if (d.length > MAX_DRINK_) throw new Error('ドリンク名は' + MAX_DRINK_ + '文字以内で入力してください。');
+  if (!d) throw appErr_('ドリンクを選んでください。');
+  if (d.length > MAX_DRINK_) throw appErr_('ドリンク名は' + MAX_DRINK_ + '文字以内で入力してください。');
   return d;
 }
 
 function checkMenu_(list) {
-  if (!Array.isArray(list)) throw new Error('ドリンクメニューを入力してください。');
+  if (!Array.isArray(list)) throw appErr_('ドリンクメニューを入力してください。');
   const out = [];
   list.forEach(function (x) {
     if (typeof x !== 'string') return;
     const d = clean_(x);
     if (!d) return;
-    if (d.length > MAX_DRINK_) throw new Error('「' + d.slice(0, 20) + '」は長すぎます。ドリンク名は' + MAX_DRINK_ + '文字以内で入力してください。');
-    if (d === UNDECIDED_) throw new Error('「' + UNDECIDED_ + '」はメニューに入れられません（参加者の画面に「あとで決める」が自動で出ます）。');
+    if (d.length > MAX_DRINK_) throw appErr_('「' + d.slice(0, 20) + '」は長すぎます。ドリンク名は' + MAX_DRINK_ + '文字以内で入力してください。');
+    if (d === UNDECIDED_) throw appErr_('「' + UNDECIDED_ + '」はメニューに入れられません（参加者の画面に「あとで決める」が自動で出ます）。');
     if (out.indexOf(d) < 0) out.push(d);
   });
-  if (!out.length) throw new Error('ドリンクメニューを1つ以上入力してください。');
-  if (out.length > MAX_DRINKS_) throw new Error('ドリンクメニューは' + MAX_DRINKS_ + '個までです。');
+  if (!out.length) throw appErr_('ドリンクメニューを1つ以上入力してください。');
+  if (out.length > MAX_DRINKS_) throw appErr_('ドリンクメニューは' + MAX_DRINKS_ + '個までです。');
   return out;
 }
 
 function checkBaseUrl_(url) {
-  if (typeof url !== 'string') throw new Error('URLを文字で入力してください。');
+  if (typeof url !== 'string') throw appErr_('URLを文字で入力してください。');
   let u = url.trim();
   if (!u) return '';
   u = u.replace(/#.*$/, '').replace(/\?.*$/, '');
-  if (!/^https:\/\/[^\s"'<>\\`]+$/.test(u)) throw new Error('URLは https:// から始まる形で入力してください。');
-  if (u.length > MAX_URL_) throw new Error('URLは' + MAX_URL_ + '文字以内で入力してください。');
-  if (isDevUrl_(u)) throw new Error('/dev で終わるURLはテスト用で、参加者は開けません。「デプロイを管理」に出ている /exec で終わるURLを入力してください。');
+  if (!/^https:\/\/[^\s"'<>\\`]+$/.test(u)) throw appErr_('URLは https:// から始まる形で入力してください。');
+  if (u.length > MAX_URL_) throw appErr_('URLは' + MAX_URL_ + '文字以内で入力してください。');
+  if (isDevUrl_(u)) throw appErr_('/dev で終わるURLはテスト用で、参加者は開けません。「デプロイを管理」に出ている /exec で終わるURLを入力してください。');
   return u;
 }
 
@@ -525,7 +565,7 @@ function spreadsheet_() {
   if (id) {
     try { return SpreadsheetApp.openById(id); } catch (err) { /* 下でまとめてエラー */ }
   }
-  throw new Error('保存先のスプレッドシートが見つかりません。幹事の方は Apps Script エディタで setup を実行してください。');
+  throw appErr_('保存先のスプレッドシートが見つかりません。幹事の方は Apps Script エディタで setup を実行してください。');
 }
 
 function writeHeaders_(sh) {
@@ -582,7 +622,7 @@ function readKeyValues_(sh) {
   const out = [];
   sh.getRange(1, 1, last, 2).getValues().forEach(function (r, i) {
     const k = String(r[0]).trim();
-    if (k) out.push([k, r[1], i + 1]);
+    if (k) out.push([k, typeof r[1] === 'string' ? unsafeText_(r[1]) : r[1], i + 1]);
   });
   return out;
 }
@@ -597,7 +637,7 @@ function writeKeyValues_(sh, rows) {
   const grid = last ? sh.getRange(1, 1, last, 2).getValues() : [];
   const at = Object.create(null);
   grid.forEach(function (g, i) { const k = String(g[0]).trim(); if (k) (at[k] = at[k] || []).push(i); });
-  const val = function (x) { return [x[0], x[1] === null || x[1] === undefined ? '' : String(x[1])]; };
+  const val = function (x) { return [x[0], x[1] === null || x[1] === undefined ? '' : safeText_(String(x[1]))]; };
   rows.forEach(function (x) {
     if (at[x[0]]) at[x[0]].forEach(function (i) { grid[i] = val(x); });
     else { grid.push(val(x)); at[x[0]] = [grid.length - 1]; }
@@ -656,9 +696,16 @@ function cellText_(v) {
   if (v === null || v === undefined) return null;
   if (isDate_(v)) return Utilities.formatDate(v, TZ_, 'yyyy/MM/dd HH:mm:ss');
   if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE'; // シートでの表示と同じにします
-  const s = String(v).trim();
+  const s = unsafeText_(String(v)).trim();
   return s ? s : null;
 }
+
+/*
+ * 利用者が入力した文字（お名前・ドリンク・会の名前など）が「=」「+」「-」「@」で始まると、
+ * スプレッドシートが数式として扱うことがあります。先頭に「'」を付けて文字として書き込み、読むときに外します。
+ */
+function safeText_(v) { return typeof v === 'string' && /^[=+\-@]/.test(v) ? "'" + v : v; }
+function unsafeText_(s) { return /^'[=+\-@]/.test(s) ? s.slice(1) : s; }
 
 /*
  * 全行を読み込み、正規化した名簿と設定を返します。
@@ -736,12 +783,12 @@ function seatOf_(v) {
 }
 
 function rowValues_(p) {
-  return [p.id, p.token, p.name, p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, p.drink || '', p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
+  return [p.id, p.token, safeText_(p.name), p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, safeText_(p.drink || ''), p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
 }
 
 function ghostValues_(g) {
   const W = HEADERS_.length, r = [];
-  for (let c = 0; c < W; c++) r.push(c === COL_SEAT_ - 1 ? (g.seat === null ? '' : g.seat) : (cellText_(g.raw[c]) || ''));
+  for (let c = 0; c < W; c++) r.push(c === COL_SEAT_ - 1 ? (g.seat === null ? '' : g.seat) : safeText_(cellText_(g.raw[c]) || ''));
   return r;
 }
 
@@ -761,9 +808,9 @@ function verifyRows_(db) {
     .concat(db.ghosts.map(function (g) { return [g.row, g.origId]; }));
   if (!rows.length) return;
   const max = rows.reduce(function (m, x) { return x[0] > m ? x[0] : m; }, 2);
-  if (max > db.sheet.getMaxRows()) throw new Error(ERR_BUSY_);
+  if (max > db.sheet.getMaxRows()) throw appErr_(ERR_BUSY_);
   const col = db.sheet.getRange(2, 1, max - 1, 1).getValues();
-  rows.forEach(function (x) { if (cellText_(col[x[0] - 2][0]) !== (x[1] || null)) throw new Error(ERR_BUSY_); });
+  rows.forEach(function (x) { if (cellText_(col[x[0] - 2][0]) !== (x[1] || null)) throw appErr_(ERR_BUSY_); });
 }
 
 function save_(db) {
@@ -836,7 +883,7 @@ function save_(db) {
 /* 1人分の行だけを書き込みます（参加者の抽選・ドリンク登録用）。読み込み時に直した箇所があれば全体を書き込みます。 */
 function saveRow_(db, p) {
   if (db.dirty || !p.row) { save_(db); return; }
-  if (cellText_(db.sheet.getRange(p.row, 1).getValue()) !== (p.origId || null)) throw new Error(ERR_BUSY_); // 行がずれていたら書かない（上の verifyRows_ と同じ理由）
+  if (cellText_(db.sheet.getRange(p.row, 1).getValue()) !== (p.origId || null)) throw appErr_(ERR_BUSY_); // 行がずれていたら書かない（上の verifyRows_ と同じ理由）
   const range = db.sheet.getRange(p.row, 1, 1, HEADERS_.length);
   range.setNumberFormat('@');
   db.sheet.getRange(p.row, COL_SEAT_).setNumberFormat('0');
@@ -863,14 +910,14 @@ function newPerson_(db, name, kind) {
 function findByToken_(db, token) {
   checkTokenShape_(token);
   for (let i = 0; i < db.people.length; i++) if (db.people[i].token === token) return db.people[i];
-  throw new Error(ERR_TOKEN_);
+  throw appErr_(ERR_TOKEN_);
 }
 
 function findById_(db, id) {
   if (typeof id === 'string' && id) {
     for (let i = 0; i < db.people.length; i++) if (db.people[i].id === id) return db.people[i];
   }
-  throw new Error(ERR_PERSON_);
+  throw appErr_(ERR_PERSON_);
 }
 
 function freeSeats_(db) {
@@ -884,10 +931,10 @@ function freeSeats_(db) {
 
 /* 1人分の抽選。席を割り当てたら true、すでに席があれば false（冪等）。 */
 function drawFor_(db, p) {
-  if (p.kind === 'fixed') throw new Error(ERR_FIXED_);
+  if (p.kind === 'fixed') throw appErr_(ERR_FIXED_);
   if (p.seat !== null) return false;
   const free = freeSeats_(db);
-  if (!free.length) throw new Error(ERR_NOSEAT_);
+  if (!free.length) throw appErr_(ERR_NOSEAT_);
   p.seat = free[randomIndex_(free.length)];
   p.drawnAt = now_();
   return true;

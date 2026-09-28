@@ -265,7 +265,7 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
     <h2>QR用のURL（任意）</h2>
     <p class="hint">ふだんは空のままで大丈夫です（デプロイしたWebアプリのURLを自動で使います）。独自のURLを使うときだけ、https:// で始まるURLを入力してください。</p>
     <label for="baseurl">URLの上書き</label>
-    <div class="row"><input id="baseurl" class="setting" maxlength="300" autocomplete="off" inputmode="url" placeholder="空欄なら自動"><button id="baseurlsave">保存</button></div>
+    <div class="row"><input id="baseurl" class="setting" maxlength="190" autocomplete="off" inputmode="url" placeholder="空欄なら自動"><button id="baseurlsave">保存</button></div>
     <div class="urlbox" id="appurl"></div>
    </div>
   </div>
@@ -691,7 +691,7 @@ function renderJoin(){
  box.replaceChildren();
  if(svg)box.innerHTML=svg;else box.append(el('p',{class:'emptynote',text:url?'QRコードに収まりません。QR用のURLを短くしてください。':'QRに使うURLがありません。先にWebアプリとしてデプロイしてください。'}));
  if($('joinlink').value!==url)$('joinlink').value=url;
- $('joinprint').disabled=!svg;$('joincopy').disabled=!url;
+ $('joinprint').disabled=!svg;$('joincopy').disabled=!url;$('joinshow').disabled=!svg;
  if(url){$('joinopenlink').href=url;$('joinopenlink').removeAttribute('aria-disabled');}else{$('joinopenlink').removeAttribute('href');$('joinopenlink').setAttribute('aria-disabled','true');}
 }
 function renderQr(){
@@ -982,7 +982,7 @@ $('printbtn').onclick=()=>{
   if(S.settings.event)card.append(el('p',{class:'ev',text:S.settings.event}));
   card.append(el('p',{class:'nm',text:p.name+' さん'}));
   const holder=document.createElement('div');holder.innerHTML=svg;card.append(holder.firstElementChild);
-  card.append(el('p',{class:'note',text:'スマホのカメラで読み取って、くじを引いてドリンクを選んでください'}));
+  card.append(el('p',{class:'note',text:p.kind==='fixed'?'スマホのカメラで読み取って、ドリンクを選んでください':'スマホのカメラで読み取って、くじを引いてドリンクを選んでください'}));
   root.append(card);
  }
  if(!root.children.length){showError(Error('印刷できるQRコードがありません。'));return;}
@@ -1012,6 +1012,10 @@ $('linkcsv').onclick=()=>{
 
 /* 起動 */
 render();
+// 古いブラウザ（iOS 15.3 以前など）は、確認や修正の画面（dialog）が使えません
+if(typeof HTMLDialogElement==='undefined'||!('showModal' in HTMLDialogElement.prototype)){
+ const w=$('warn');w.hidden=false;w.textContent='このブラウザでは幹事画面の一部（修正・QR表示・確認の画面）が使えません。パソコンのChromeなど新しいブラウザで開いてください。';
+}
 if(typeof google==='undefined'||!google.script||!google.script.url){
  $('loading').hidden=true;showError(Error('この画面は Google Apps Script の Webアプリとして開いてください。'));
 }else{
