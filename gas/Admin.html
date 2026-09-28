@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>席くじ 幹事画面</title><style>
+:root{font-family:system-ui,-apple-system,'Noto Sans JP',sans-serif;color:#182d4a;background:#f3f6fb;font-size:16px}
+*{box-sizing:border-box}
+body{margin:0;background:#f3f6fb}
+button,input,select,textarea{font:inherit}
+button,.btn{cursor:pointer;border:0;border-radius:12px;padding:12px 18px;font-weight:700;min-height:48px;background:#e9eff8;color:#183659;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;font-size:16px;line-height:1.3}
+button:hover,.btn:hover{filter:brightness(.96)}
+button:disabled{opacity:.45;cursor:default;filter:none}
+.btn[aria-disabled=true]{opacity:.45;pointer-events:none}
+button:focus-visible,.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+input,select,textarea{width:100%;padding:12px 13px;border:1px solid #bac8db;border-radius:10px;background:#fff;color:#182d4a}
+textarea{line-height:1.7;resize:vertical}
+label{display:block;font-size:14px;font-weight:700;margin:14px 0 7px}
+.primary{background:#2255aa;color:#fff;box-shadow:0 5px 12px #2255aa20}
+.danger{color:#a53636;background:#fff0ee}
+.small{padding:8px 12px;font-size:14px;min-height:40px}
+header{max-width:1180px;margin:auto;display:flex;align-items:center;justify-content:space-between;padding:20px 24px 12px;gap:14px;flex-wrap:wrap}
+h1{font-size:22px;margin:0;letter-spacing:.06em}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.brand .sub{font-size:13px;color:#597089;font-weight:700;letter-spacing:.08em;margin-top:2px;overflow-wrap:anywhere}
+.mark{background:#193961;color:#fff;padding:8px 12px;border-radius:10px;font-weight:800}
+.tabs{display:flex;gap:6px;background:#e3eaf4;padding:6px;border-radius:14px}
+.tabs button{background:transparent;min-height:44px;padding:10px 15px;font-size:15px}
+.tabs button[aria-pressed=true]{background:#fff;box-shadow:0 2px 6px #1b3a6a1f}
+main{max-width:1180px;margin:8px auto 16px;padding:0 22px}
+.bars{position:sticky;top:0;z-index:5}
+#error{background:#fff0ec;color:#a02a18;border:1px solid #f3c4b8;padding:14px 16px;border-radius:12px;margin-bottom:12px;line-height:1.7;display:flex;gap:12px;align-items:flex-start;justify-content:space-between;box-shadow:0 6px 18px #a02a1814}
+#error button{background:transparent;color:#a02a18;min-height:32px;padding:4px 8px;font-size:14px}
+#status{color:#286347;font-size:15px;font-weight:700;min-height:22px;margin:0 2px 10px;line-height:1.6}
+.warn{background:#fff8e6;border:1px solid #f0d79a;color:#7a5410;padding:14px 16px;border-radius:12px;margin-bottom:16px;font-size:15px;line-height:1.7}
+.panel{background:#fff;border:1px solid #dfe6ef;border-radius:20px;padding:24px;margin-bottom:18px;box-shadow:0 10px 35px #213a630a}
+.panel h2{font-size:20px;margin:0 0 6px}
+.panel h3{font-size:16px;margin:24px 0 8px}
+.hint{color:#617087;font-size:14px;line-height:1.8;margin:6px 0}
+.listhead{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px}
+.actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.updated{font-size:13px;color:#617087;font-variant-numeric:tabular-nums}
+.updated .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#3aa06a;margin-right:6px;vertical-align:1px}
+.updated.paused .dot{background:#b7c2d1}
+.switchrow{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;background:#f6f9fd;border:1px solid #e1e8f2;border-radius:14px;padding:12px 16px;margin-bottom:16px}
+.switchrow .lbl{font-weight:700}
+.switchrow .lbl small{display:block;font-weight:400;color:#617087;font-size:13px;margin-top:2px;line-height:1.6}
+.switch{min-height:44px;padding:8px 14px 8px 8px;border-radius:999px;background:#e9eff8;gap:10px}
+.switch .knob{width:46px;height:28px;border-radius:999px;background:#b9c5d6;position:relative;transition:background .2s;flex:none}
+.switch .knob::after{content:'';position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 3px #0003;transition:left .2s}
+.switch[aria-checked=true] .knob{background:#2e8b57}
+.switch[aria-checked=true] .knob::after{left:21px}
+.summary{background:#edf3fc;border-radius:16px;padding:18px;margin:0 0 20px}
+.summary h3{margin:0 0 12px;font-size:17px}
+.drinkcounts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.drinkcount{background:#fff;padding:12px 14px;border-radius:12px;display:flex;justify-content:space-between;align-items:baseline;gap:10px;overflow-wrap:anywhere;border:1px solid #dde6f2}
+.drinkcount span{font-weight:700;font-size:15px}
+.drinkcount strong{font-size:24px;color:#193961;font-variant-numeric:tabular-nums;white-space:nowrap}
+.drinkcount strong small{font-size:13px;margin-left:2px;color:#597089}
+.drinkcount.zero strong{color:#a5b2c4}
+.drinkcount.meta{background:#f7f9fc;border-style:dashed}
+.drinkcount.total{background:#193961;border-color:#193961}
+.drinkcount.total span,.drinkcount.total strong,.drinkcount.total strong small{color:#fff}
+.filters{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin-bottom:6px}
+.filters label{margin-top:0}
+.check{display:flex;align-items:center;gap:8px;margin:0;font-weight:700;font-size:15px;min-height:48px;white-space:nowrap}
+.check input{width:20px;height:20px;margin:0;padding:0;flex:none}
+.tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{width:100%;border-collapse:collapse;text-align:left;table-layout:fixed;min-width:520px}
+th{color:#65738a;font-size:14px;font-weight:700}
+td,th{padding:11px 10px;border-bottom:1px solid #e7ecf4;overflow-wrap:anywhere;vertical-align:middle}
+tbody tr:hover{background:#f8fafd}
+td.seat{font-size:20px;font-weight:800;color:#193961;font-variant-numeric:tabular-nums}
+td.seat.soft{font-size:15px;color:#8a97a9;font-weight:700}
+td.seat.fixed{font-size:14px;color:#44566f}
+td.muted,span.muted{color:#98a4b5}
+td.time{font-size:14px;color:#617087;font-variant-numeric:tabular-nums}
+td.act{text-align:right}
+td.act .actions{justify-content:flex-end;gap:6px}
+col.c-seat{width:84px}col.c-time{width:92px}col.c-act{width:88px}col.c-kind{width:92px}col.c-state{width:96px}col.c-qract{width:220px}col.c-drink{width:28%}
+.tag{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:#eef3fa;color:#44566f;white-space:nowrap}
+.tag.ok{background:#e4f3ea;color:#256143}
+.tag.wait{background:#fff4dc;color:#7a5410}
+.emptynote{color:#65738a;font-size:14px;padding:14px 2px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+.grid2 .panel{margin-bottom:0}
+.stack>*+*{margin-top:18px}
+.row{display:flex;gap:9px;align-items:flex-start}
+.row input{flex:1;min-width:0}
+.row button{white-space:nowrap;flex:none}
+button.dirty{background:#2255aa;color:#fff}
+.radios{display:flex;gap:18px;flex-wrap:wrap}
+.radios label{display:flex;align-items:center;gap:7px;margin:0;font-weight:400;min-height:40px}
+.radios input{width:20px;height:20px;margin:0;padding:0}
+.resetbtns{display:flex;gap:9px;flex-wrap:wrap;margin-top:12px}
+.urlbox{font-size:13px;background:#f6f9fd;border:1px solid #e1e8f2;border-radius:10px;padding:10px 12px;overflow-wrap:anywhere;color:#44566f;margin:8px 0}
+.qrbox{background:#fff;border:1px solid #dfe6ef;border-radius:14px;padding:12px;margin:8px auto 6px;max-width:320px}
+.qrbox svg{display:block;width:100%;height:auto}
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
+#loading{text-align:center;padding:80px 16px;color:#617087}
+#loading .spin,.busyind .spin{display:inline-block;width:18px;height:18px;border:3px solid #c9d5e6;border-top-color:#2255aa;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:8px}
+.busyind{font-size:13px;color:#597089;font-weight:700;visibility:hidden}
+body.busy .busyind{visibility:visible}
+#loading.failed .spin{display:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+dialog{border:0;border-radius:20px;padding:24px;width:min(480px,94vw);color:#182d4a;box-shadow:0 20px 100px #0003;max-height:92vh;overflow-y:auto}
+dialog::backdrop{background:#10244380}
+dialog h2{font-size:21px;margin:0 0 6px;overflow-wrap:anywhere}
+dialog p{line-height:1.8}
+.dialog-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:20px;flex-wrap:wrap}
+.dialog-actions .spacer{flex:1}
+.modalerror{color:#a02a18;font-size:14px;background:#fff0ec;border-radius:10px;padding:10px 12px;line-height:1.7}
+#printsheet{display:none}
+footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;color:#65738a;line-height:1.8}
+[hidden]{display:none!important}
+@media(max-width:860px){
+ header{padding:14px 14px 8px}h1{font-size:19px}
+ .tabs{width:100%}.tabs button{flex:1;padding:10px 6px;font-size:14px}
+ main{padding:0 12px}
+ .panel{padding:18px 14px;border-radius:16px}
+ .grid2{grid-template-columns:1fr}
+ td,th{padding:10px 7px}
+ footer{padding:0 16px 24px}
+}
+@media(max-width:560px){
+ .hide-sm{display:none}
+ table.compact{min-width:0}
+ .filters{grid-template-columns:1fr}
+ .drinkcounts{grid-template-columns:1fr 1fr}
+ .drinkcount{flex-direction:column;align-items:flex-start;gap:2px}
+ col.c-qract{width:112px}col.c-seat{width:58px}col.c-act{width:66px}col.c-kind{width:74px}col.c-state{width:74px}col.c-drink{width:36%}
+ td.seat{font-size:17px}td.seat.fixed{font-size:12px}
+ td.act button{padding:8px 10px}
+ td.act .actions{flex-direction:column;align-items:stretch}
+ .dialog-actions button,.dialog-actions .btn{flex:1 1 auto}
+ .dialog-actions .spacer{display:none}
+ .listhead .actions{width:100%}
+ .listhead .actions>*{flex:1 1 auto}
+}
+@media print{
+ header,main,footer,dialog,.bars{display:none!important}
+ body{background:#fff}
+ #printsheet{display:grid;grid-template-columns:1fr 1fr;gap:10mm;padding:8mm}
+ .qrcard{border:1px dashed #9aa8bb;border-radius:6mm;padding:6mm;text-align:center;break-inside:avoid;page-break-inside:avoid}
+ .qrcard .ev{font-size:10pt;color:#44566f;margin:0 0 2mm;overflow-wrap:anywhere}
+ .qrcard .nm{font-size:15pt;font-weight:700;margin:0 0 3mm;overflow-wrap:anywhere}
+ .qrcard svg{width:52mm;height:52mm}
+ .qrcard .note{font-size:9pt;color:#44566f;margin:3mm 0 0;line-height:1.6}
+}
+</style></head><body>
+<header>
+ <div class="brand"><span class="mark" aria-hidden="true">席</span><div><h1>席くじ 幹事画面</h1><div class="sub" id="eventhead" hidden></div></div><span class="busyind" aria-hidden="true"><span class="spin"></span>通信中…</span></div>
+ <nav class="tabs" aria-label="画面の切り替え">
+  <button id="tab-drinks" data-free="1" aria-pressed="true">ドリンク一覧</button>
+  <button id="tab-qr" data-free="1" aria-pressed="false">QRコード</button>
+  <button id="tab-setup" data-free="1" aria-pressed="false">名簿・設定</button>
+ </nav>
+</header>
+<main>
+<div class="bars">
+ <div id="error" role="alert" hidden><span id="errortext"></span><button id="errorclose" data-free="1" aria-label="エラー表示を閉じる">閉じる</button></div>
+</div>
+<p id="status" role="status"></p>
+<div id="warn" class="warn" hidden></div>
+<div id="loading"><span class="spin"></span><span id="loadingtext">読み込み中…</span><div><button id="retry" hidden style="margin-top:16px">もう一度読み込む</button></div></div>
+
+<section id="view-drinks" hidden>
+ <div class="panel">
+  <div class="listhead">
+   <div><h2>ドリンク一覧</h2><p class="hint">参加者がスマホで登録した1杯目のドリンクです。20秒ごとに自動で更新します。</p></div>
+   <div class="actions"><span class="updated" id="updated"><span class="dot"></span><span id="updatedtext">—</span></span><button id="refresh">更新</button><button id="csv">CSVを保存</button></div>
+  </div>
+  <div class="switchrow">
+   <div class="lbl">ドリンクの受付<small id="drinkopenhint"></small></div>
+   <button class="switch drinkopen" role="switch" aria-checked="false"><span class="knob" aria-hidden="true"></span><span class="swtext">—</span></button>
+  </div>
+  <section class="summary" aria-label="ドリンクの注文数">
+   <h3>1杯目のドリンク集計</h3>
+   <div id="drinkcounts" class="drinkcounts"></div>
+   <p id="drinktotal" class="hint"></p>
+  </section>
+  <div class="filters">
+   <div><label for="drinksearch">お名前・席番号で絞り込み</label><input id="drinksearch" autocomplete="off" placeholder="例：やま／12"></div>
+   <label class="check"><input type="checkbox" id="onlynone"> 未登録の方だけ</label>
+  </div>
+  <p class="hint" id="drinkcountline"></p>
+  <div id="drinkrows" class="tablewrap"></div>
+ </div>
+</section>
+
+<section id="view-qr" hidden>
+ <div class="panel">
+  <h2>QRコードを配る</h2>
+  <p class="hint">お一人ずつ専用のQRコードです。参加者が自分のスマホで読み取ると、「くじを引く」演出のあとに席が決まり、そのまま1杯目のドリンクを登録できます。席はその場でサーバーが抽選するので、重なることはありません。<br>QRコードには本人用の合言葉が入っています。ほかの方のQRコードは渡さないでください。</p>
+  <p class="hint">会の名前：<strong id="qrevent"></strong></p>
+  <div id="qrurlwarn" class="warn" hidden>QRコードに入れるWebアプリのURLが取得できません。先にWebアプリとしてデプロイするか、「名簿・設定」の「QR用のURL」を設定してください。</div>
+  <div class="stats" id="qrstats"></div>
+  <div class="actions" style="margin-top:14px"><button id="printbtn" class="primary">QRカードを印刷</button><button id="linkcsv">リンク一覧CSV</button><button id="drawall">まだ決まっていない方の席をまとめて決める</button></div>
+  <p class="hint" id="qrstate"></p>
+ </div>
+ <div class="panel">
+  <div class="listhead"><div><h2>参加者ごとのQRコード</h2><p class="hint">スマホを持っていない方は「代わりに引く」で、この画面から席を決められます。</p></div></div>
+  <label for="qrsearch" style="margin-top:0">お名前・席番号で絞り込み</label>
+  <input id="qrsearch" autocomplete="off" placeholder="例：やま／12">
+  <div id="qrrows" class="tablewrap" style="margin-top:10px"></div>
+ </div>
+</section>
+
+<section id="view-setup" hidden>
+ <div class="grid2">
+  <div class="stack">
+   <div class="panel">
+    <h2>会の設定</h2>
+    <label for="event">会の名前（任意・40文字まで。参加者の画面とQRカードに表示します）</label>
+    <div class="row"><input id="event" class="setting" maxlength="40" autocomplete="off" placeholder="例：送別会"><button id="eventsave">保存</button></div>
+    <label for="seats">抽選する席の数（1〜99）</label>
+    <div class="row"><input id="seats" class="setting" type="number" min="1" max="99" step="1" inputmode="numeric"><button id="seatssave">保存</button></div>
+    <p class="hint" id="seatsstate"></p>
+    <div class="switchrow" style="margin:14px 0 0">
+     <div class="lbl">ドリンクの受付<small>オフにすると、参加者はドリンクを登録・変更できなくなります。</small></div>
+     <button class="switch drinkopen" role="switch" aria-checked="false"><span class="knob" aria-hidden="true"></span><span class="swtext">—</span></button>
+    </div>
+   </div>
+   <div class="panel">
+    <h2>ドリンクメニュー</h2>
+    <p class="hint">1行に1つ（20個まで・各30文字まで）。参加者の画面にボタンとして並びます。メニューにないものは「その他」から入力できます。</p>
+    <label for="drinks">メニュー</label>
+    <textarea id="drinks" class="setting" rows="7"></textarea>
+    <div class="actions" style="margin-top:10px"><button id="drinkssave">メニューを保存</button></div>
+   </div>
+   <div class="panel">
+    <h2>QR用のURL（任意）</h2>
+    <p class="hint">ふだんは空のままで大丈夫です（デプロイしたWebアプリのURLを自動で使います）。独自のURLを使うときだけ、https:// で始まるURLを入力してください。</p>
+    <label for="baseurl">URLの上書き</label>
+    <div class="row"><input id="baseurl" class="setting" maxlength="300" autocomplete="off" inputmode="url" placeholder="空欄なら自動"><button id="baseurlsave">保存</button></div>
+    <div class="urlbox" id="appurl"></div>
+   </div>
+  </div>
+  <div class="stack">
+   <div class="panel">
+    <h2>名簿の一括登録</h2>
+    <p class="hint">1行に1名（読点「、」・カンマ・タブ区切りでもOK）。名簿を貼り付けて追加できます。</p>
+    <label for="bulk">お名前の一覧</label>
+    <textarea id="bulk" rows="6" placeholder="山田 太郎&#10;鈴木 花子&#10;佐藤 次郎"></textarea>
+    <label>区分</label>
+    <div class="radios">
+     <label><input type="radio" name="bulkkind" value="lottery" checked> くじを引く方</label>
+     <label><input type="radio" name="bulkkind" value="fixed"> 固定席の方</label>
+    </div>
+    <div class="actions" style="margin-top:12px"><button id="bulkadd" class="primary">名簿に追加</button></div>
+    <p class="hint" id="bulkstate"></p>
+   </div>
+   <div class="panel">
+    <h2>リセット</h2>
+    <p class="hint">やり直すときに使います。元に戻せないので、必要なら先に「ドリンク一覧」でCSVを保存してください。</p>
+    <div class="resetbtns"><button class="danger" id="resetseats">席だけ消す</button><button class="danger" id="resetdrinks">ドリンクだけ消す</button><button class="danger" id="resetall">名簿ごと消す</button></div>
+   </div>
+  </div>
+ </div>
+ <div class="panel" style="margin-top:18px">
+  <h2>名簿</h2>
+  <p class="hint">お名前・区分・ドリンクは「修正」から変更できます。区分を固定席にすると、決まっていた席は空きに戻ります。</p>
+  <p class="hint" id="rostercount"></p>
+  <div id="roster" class="tablewrap"></div>
+ </div>
+</section>
+</main>
+<section id="printsheet" aria-hidden="true"></section>
+<footer>記録はGoogleスプレッドシートに保存されます。この画面のURLには幹事用の合言葉が入っています。参加者には共有しないでください。</footer>
+
+<dialog id="editdialog"><h2 id="edittitle">修正</h2><form id="editform">
+ <label for="editname">お名前</label><input id="editname" maxlength="60" required autocomplete="off">
+ <label for="editkind">区分</label>
+ <select id="editkind"><option value="lottery">くじを引く（抽選席）</option><option value="fixed">くじを引かない（固定席）</option></select>
+ <p class="hint" id="editkindhint"></p>
+ <label for="editdrink">1杯目のドリンク</label>
+ <select id="editdrink"></select>
+ <div id="editotherwrap" hidden><label for="editother">ドリンク名（30文字まで）</label><input id="editother" maxlength="30" autocomplete="off" placeholder="例：ジンジャーエール"></div>
+ <label class="check" id="clearseatwrap" style="margin-top:12px"><input type="checkbox" id="editclearseat"> <span id="clearseatlabel">席を空きに戻す</span></label>
+ <p id="editerror" class="modalerror" role="alert" hidden></p>
+ <div class="dialog-actions"><button type="button" class="danger" id="editdelete">名簿から削除</button><span class="spacer"></span><button type="button" id="editcancel" data-free="1">キャンセル</button><button type="submit" class="primary">保存</button></div>
+</form></dialog>
+
+<dialog id="qrdialog"><h2 id="qrtitle">QRコード</h2>
+ <p class="hint" id="qrsub"></p>
+ <div id="qrbox" class="qrbox"></div>
+ <p class="hint" id="qrhint" style="text-align:center"></p>
+ <label for="qrlink">リンク</label><input id="qrlink" readonly>
+ <p id="qrerror" class="modalerror" role="alert" hidden></p>
+ <div class="dialog-actions"><button type="button" class="danger" id="qrreissue">QRを作り直す</button><span class="spacer"></span><button type="button" id="qrcopy" data-free="1">コピー</button><a class="btn" id="qropen" target="_blank" rel="noopener">この端末で開く</a><button type="button" id="qrclose" data-free="1" class="primary">閉じる</button></div>
+</dialog>
+
+<dialog id="askdialog"><h2 id="asktitle"></h2>
+ <p id="askmsg"></p>
+ <div class="dialog-actions"><button type="button" id="askno" data-free="1">やめる</button><button type="button" id="askyes" data-free="1" class="primary">OK</button></div>
+</dialog>
+
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const REFRESH_MS=20000;
+let key='',S=null,view='drinks',busy=0,seq=0,applied=0,lastLoad=0,editing=null,qrId=null;
+
+function clean(t){return String(t==null?'':t).normalize('NFKC').trim().replace(/\s+/g,' ');}
+function tidy(t){return String(t==null?'':t).trim().replace(/\s+/g,' ');}
+function el(tag,props,...kids){
+ const e=document.createElement(tag);
+ if(props)for(const k in props){
+  const v=props[k];
+  if(v==null)continue;
+  if(k==='class')e.className=v;else if(k==='text')e.textContent=v;
+  else if(k.slice(0,2)==='on'||k==='disabled'||k==='hidden'||k==='title')e[k]=v;
+  else e.setAttribute(k,v);
+ }
+ for(const c of kids)if(c!=null&&c!==false)e.append(c);
+ return e;
+}
+
+/* QRコード生成（バイトモード・誤り訂正レベルM・型番1〜10）。外部ライブラリを使わないための自前実装。 */
+const QR_EC={1:[10,1,16,0,0],2:[16,1,28,0,0],3:[26,1,44,0,0],4:[18,2,32,0,0],5:[24,2,43,0,0],6:[16,4,27,0,0],7:[18,4,31,0,0],8:[22,2,38,2,39],9:[22,3,36,2,37],10:[26,4,43,1,44]};
+const QR_ALIGN={1:[],2:[6,18],3:[6,22],4:[6,26],5:[6,30],6:[6,34],7:[6,22,38],8:[6,24,42],9:[6,26,46],10:[6,28,50]};
+const QR_EXP=new Uint8Array(512),QR_LOG=new Uint8Array(256);
+for(let i=0,x=1;i<255;i++){QR_EXP[i]=x;QR_LOG[x]=i;x<<=1;if(x&0x100)x^=0x11d;}
+for(let i=255;i<512;i++)QR_EXP[i]=QR_EXP[i-255];
+function qrMul(a,b){return a&&b?QR_EXP[QR_LOG[a]+QR_LOG[b]]:0;}
+function qrGen(n){let g=[1];for(let i=0;i<n;i++){const next=new Array(g.length+1).fill(0);for(let j=0;j<g.length;j++){next[j]^=g[j];next[j+1]^=qrMul(g[j],QR_EXP[i]);}g=next;}return g;}
+function qrEcc(block,n){const g=qrGen(n),res=new Array(block.length+n).fill(0);
+ for(let i=0;i<block.length;i++)res[i]=block[i];
+ for(let i=0;i<block.length;i++){const f=res[i];if(f)for(let j=0;j<g.length;j++)res[i+j]^=qrMul(g[j],f);}
+ return res.slice(block.length);}
+function qrEncode(text){
+ const bytes=new TextEncoder().encode(text);
+ let version=0,ecCw=0,b1=0,d1=0,b2=0,d2=0,dataCw=0;
+ for(let v=1;v<=10;v++){
+  const [e,c1,s1,c2,s2]=QR_EC[v],cw=c1*s1+c2*s2;
+  if(4+(v<10?8:16)+bytes.length*8<=cw*8){version=v;ecCw=e;b1=c1;d1=s1;b2=c2;d2=s2;dataCw=cw;break;}
+ }
+ if(!version)throw Error('QRコードに収まりません。文字数を減らしてください。');
+ const bits=[],push=(val,len)=>{for(let i=len-1;i>=0;i--)bits.push((val>>i)&1);};
+ push(4,4);push(bytes.length,version<10?8:16);
+ for(const b of bytes)push(b,8);
+ for(let i=0;i<4&&bits.length<dataCw*8;i++)bits.push(0);
+ while(bits.length%8)bits.push(0);
+ const data=[];
+ for(let i=0;i<bits.length;i+=8){let n=0;for(let j=0;j<8;j++)n=(n<<1)|bits[i+j];data.push(n);}
+ for(let k=0;data.length<dataCw;k++)data.push(k%2?0x11:0xec);
+ const blocks=[],eccs=[];
+ let pos=0;
+ for(const [count,len] of [[b1,d1],[b2,d2]])for(let i=0;i<count;i++){const blk=data.slice(pos,pos+len);pos+=len;blocks.push(blk);eccs.push(qrEcc(blk,ecCw));}
+ const out=[],maxLen=Math.max(...blocks.map(b=>b.length));
+ for(let i=0;i<maxLen;i++)for(const b of blocks)if(i<b.length)out.push(b[i]);
+ for(let i=0;i<ecCw;i++)for(const e of eccs)out.push(e[i]);
+
+ const size=version*4+17;
+ const mods=new Uint8Array(size*size),fixed=new Uint8Array(size*size);
+ const put=(r,c,v)=>{if(r<0||c<0||r>=size||c>=size)return;mods[r*size+c]=v;fixed[r*size+c]=1;};
+ const finder=(r,c)=>{for(let dr=-1;dr<=7;dr++)for(let dc=-1;dc<=7;dc++){
+  const on=dr>=0&&dr<=6&&dc>=0&&dc<=6&&(dr===0||dr===6||dc===0||dc===6||(dr>=2&&dr<=4&&dc>=2&&dc<=4));
+  put(r+dr,c+dc,on?1:0);}};
+ finder(0,0);finder(0,size-7);finder(size-7,0);
+ for(let i=8;i<size-8;i++){put(6,i,i%2?0:1);put(i,6,i%2?0:1);}
+ const ap=QR_ALIGN[version];
+ for(const r of ap)for(const c of ap){
+  if((r<=8&&c<=8)||(r<=8&&c>=size-9)||(r>=size-9&&c<=8))continue;
+  for(let dr=-2;dr<=2;dr++)for(let dc=-2;dc<=2;dc++)put(r+dr,c+dc,Math.max(Math.abs(dr),Math.abs(dc))===1?0:1);
+ }
+ for(let i=0;i<=8;i++){if(i!==6){put(8,i,0);put(i,8,0);}}
+ for(let i=0;i<8;i++){put(size-1-i,8,0);put(8,size-1-i,0);}
+ put(size-8,8,1);
+ if(version>=7){
+  let rem=version;
+  for(let i=0;i<12;i++)rem=(rem<<1)^((rem>>>11)*0x1f25);
+  const vbits=(version<<12)|rem;
+  for(let i=0;i<18;i++){const bit=(vbits>>i)&1,a=size-11+i%3,b=Math.floor(i/3);put(a,b,bit);put(b,a,bit);}
+ }
+ let idx=0,upward=true;
+ for(let col=size-1;col>0;col-=2){
+  if(col===6)col--;
+  for(let i=0;i<size;i++){
+   const row=upward?size-1-i:i;
+   for(const c of [col,col-1]){
+    if(fixed[row*size+c])continue;
+    let v=0;
+    if(idx<out.length*8){v=(out[idx>>3]>>(7-(idx&7)))&1;idx++;}
+    mods[row*size+c]=v;
+   }
+  }
+  upward=!upward;
+ }
+ const maskFns=[(r,c)=>(r+c)%2===0,(r,c)=>r%2===0,(r,c)=>c%3===0,(r,c)=>(r+c)%3===0,
+  (r,c)=>(Math.floor(r/2)+Math.floor(c/3))%2===0,(r,c)=>(r*c)%2+(r*c)%3===0,
+  (r,c)=>((r*c)%2+(r*c)%3)%2===0,(r,c)=>((r+c)%2+(r*c)%3)%2===0];
+ const formatBits=mask=>{
+  const d=(0<<3)|mask;
+  let rem=d<<10;
+  for(let i=4;i>=0;i--)if((rem>>(i+10))&1)rem^=0x537<<i;
+  return ((d<<10)|rem)^0x5412;
+ };
+ const applyFormat=(grid,mask)=>{
+  const bits=formatBits(mask),bit=i=>(bits>>i)&1,set=(r,c,v)=>{grid[r*size+c]=v;};
+  for(let i=0;i<=5;i++)set(i,8,bit(i));
+  set(7,8,bit(6));set(8,8,bit(7));set(8,7,bit(8));
+  for(let i=9;i<15;i++)set(8,14-i,bit(i));
+  for(let i=0;i<8;i++)set(8,size-1-i,bit(i));
+  for(let i=8;i<15;i++)set(size-15+i,8,bit(i));
+  set(size-8,8,1);
+ };
+ const penalty=grid=>{
+  let score=0;
+  const line=cells=>{
+   let s='',run=1;
+   for(const v of cells)s+=v?'1':'0';
+   for(let i=1;i<=s.length;i++){
+    if(i<s.length&&s[i]===s[i-1]){run++;continue;}
+    if(run>=5)score+=3+(run-5);
+    run=1;
+   }
+   const padded='0000'+s+'0000';
+   for(const pat of ['10111010000','00001011101'])
+    for(let i=0;(i=padded.indexOf(pat,i))>=0;i++)score+=40;
+  };
+  for(let r=0;r<size;r++)line(Array.from({length:size},(_,c)=>grid[r*size+c]));
+  for(let c=0;c<size;c++)line(Array.from({length:size},(_,r)=>grid[r*size+c]));
+  for(let r=0;r<size-1;r++)for(let c=0;c<size-1;c++){
+   const v=grid[r*size+c];
+   if(v===grid[r*size+c+1]&&v===grid[(r+1)*size+c]&&v===grid[(r+1)*size+c+1])score+=3;
+  }
+  let dark=0;
+  for(const v of grid)dark+=v;
+  score+=Math.floor(Math.abs(dark*100/(size*size)-50)/5)*10;
+  return score;
+ };
+ let best=null,bestScore=Infinity;
+ for(let mask=0;mask<8;mask++){
+  const grid=Uint8Array.from(mods);
+  for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(!fixed[r*size+c]&&maskFns[mask](r,c))grid[r*size+c]^=1;
+  applyFormat(grid,mask);
+  const s=penalty(grid);
+  if(s<bestScore){bestScore=s;best=grid;}
+ }
+ return {size,version,modules:best};
+}
+function qrSvg(text,quiet){
+ const {size,modules}=qrEncode(text),q=quiet===undefined?4:quiet,dim=size+q*2;
+ let path='';
+ for(let r=0;r<size;r++)for(let c=0;c<size;c++)if(modules[r*size+c])path+='M'+(c+q)+' '+(r+q)+'h1v1h-1z';
+ return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+dim+' '+dim+'" shape-rendering="crispEdges" role="img" aria-label="QRコード"><rect width="'+dim+'" height="'+dim+'" fill="#ffffff"/><path d="'+path+'" fill="#000000"/></svg>';
+}
+
+const qrCache=new Map();
+function qrSvgCached(text){
+ if(!qrCache.has(text)){let svg=null;try{svg=qrSvg(text);}catch(e){svg=null;}qrCache.set(text,svg);}
+ return qrCache.get(text);
+}
+
+/* サーバー呼び出し（google.script.run を Promise に） */
+function api(name,...args){
+ return new Promise((resolve,reject)=>{
+  if(typeof google==='undefined'||!google.script||!google.script.run){reject(Error('この画面は Google Apps Script の Webアプリとして開いてください。'));return;}
+  google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(errText(e)))) [name](key,...args);
+ });
+}
+// サーバーのエラー文は「Error: 」などが付いて届くことがあるので取り除きます
+function errText(e){return String((e&&e.message)||e||'通信に失敗しました。').replace(/^(?:Uncaught\s+)?(?:Error|Exception|ScriptError|TypeError):\s*/,'')||'通信に失敗しました。';}
+function isState(o){return !!o&&typeof o==='object'&&!!o.settings&&Array.isArray(o.people);}
+function applyState(st,n){
+ if(!isState(st)||n<applied)return false;
+ applied=n;S=st;lastLoad=Date.now();
+ if(qrId&&!person(qrId)&&$('qrdialog').open)$('qrdialog').close();
+ return true;
+}
+/* ボタン操作から呼ぶ。通信中は操作を止め、成功したら状態を反映する */
+async function act(name,args,onOk){
+ if(busy)return null;
+ busy++;const n=++seq;setBusy();
+ try{
+  const r=await api(name,...(args||[]));
+  applyState(isState(r)?r:r&&r.state,n);
+  hideError();
+  if(onOk)onOk(r);
+  return r;
+ }catch(e){showError(e);return null;}
+ finally{busy--;setBusy();render();}
+}
+/* 自動・手動の読み込み */
+let refreshing=false;
+async function refresh(manual){
+ if(refreshing||(busy&&!manual))return;
+ refreshing=true;const n=++seq;
+ if(manual){busy++;setBusy();}
+ try{const st=await api('adminGetState');if(applyState(st,n)){hideError();if(manual)ok('最新の状態にしました。');}}
+ catch(e){showError(e,manual?'':'自動更新に失敗しました：');}
+ finally{refreshing=false;if(manual){busy--;setBusy();}render();}
+}
+function dialogOpen(){return [...document.querySelectorAll('dialog')].some(d=>d.open);}
+/* 表を描き直しても、キーボードの位置（表の中のボタン）を失わないようにします */
+let lastFk=null;
+document.addEventListener('focusin',e=>{lastFk=(e.target&&e.target.dataset&&e.target.dataset.fk)||null;});
+document.addEventListener('pointerdown',e=>{if(!(e.target&&e.target.closest&&e.target.closest('[data-fk]')))lastFk=null;},true);
+function restoreFocus(){
+ if(!lastFk||busy||dialogOpen())return;
+ const a=document.activeElement;
+ if(a&&a!==document.body&&a.isConnected)return;
+ const [v,,id]=lastFk.split(':'),ok=b=>b&&!b.disabled&&!b.closest('[hidden]');
+ let t=[...document.querySelectorAll('[data-fk]')].find(b=>b.dataset.fk===lastFk);
+ if(!ok(t))t=[...document.querySelectorAll('[data-fk^="'+v+':"]')].find(b=>b.dataset.fk.endsWith(':'+id)&&ok(b));
+ if(ok(t))t.focus({preventScroll:true});
+}
+setInterval(()=>{if(S&&!document.hidden&&!busy&&!dialogOpen())refresh(false);},REFRESH_MS);
+document.addEventListener('visibilitychange',()=>{
+ renderUpdated();
+ if(!document.hidden&&S&&Date.now()-lastLoad>=REFRESH_MS&&!busy&&!dialogOpen())refresh(false);
+});
+
+function setBusy(){document.body.classList.toggle('busy',busy>0);lockUi();}
+function lockUi(){if(busy)for(const b of document.querySelectorAll('button,input[type=checkbox]:not(#onlynone)'))if(!b.dataset.free&&!b.disabled){b.disabled=true;b.dataset.locked='1';}}
+function unlockUi(){for(const b of document.querySelectorAll('[data-locked]')){b.disabled=false;delete b.dataset.locked;}}
+function showError(e,prefix){
+ const msg=(prefix||'')+(e?errText(e):'エラーが発生しました。');
+ $('errortext').textContent=msg;$('error').hidden=false;
+ for(const id of ['editerror','qrerror'])if($(id).closest('dialog').open){$(id).textContent=msg;$(id).hidden=false;}
+}
+function hideError(){$('error').hidden=true;$('editerror').hidden=true;$('qrerror').hidden=true;}
+function ok(msg){$('status').textContent=msg;}
+$('errorclose').onclick=hideError;
+
+let askResolve=null;
+function ask(title,msg,yes,danger){
+ $('asktitle').textContent=title;$('askmsg').textContent=msg;
+ $('askyes').textContent=yes||'OK';$('askyes').className=danger?'danger':'primary';
+ $('askdialog').showModal();$('askno').focus();
+ return new Promise(res=>{askResolve=res;});
+}
+function askDone(v){if($('askdialog').open)$('askdialog').close();const r=askResolve;askResolve=null;if(r)r(v);}
+$('askyes').onclick=()=>askDone(true);
+$('askno').onclick=()=>askDone(false);
+$('askdialog').addEventListener('close',()=>askDone(false));
+
+/* データの見せ方 */
+function person(id){return S?S.people.find(p=>p.id===id)||null:null;}
+function seatText(p){return p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未':p.seat+'番';}
+function stateText(p){return p.kind==='fixed'?'固定席':p.seat==null?'未抽選':p.seat+'番';}
+function drinkText(p){return p.drink?p.drink:'未登録';}
+function timeText(t){if(!t)return '';const m=String(t).match(/(\d{1,2}:\d{2})(:\d{2})?/);return m?m[1]:String(t);}
+function linkFor(p){const u=S&&S.settings.appUrl;return u&&p.token?u+(u.includes('?')?'&':'?')+'t='+encodeURIComponent(p.token):'';}
+function sortKey(p,i){return p.kind==='fixed'?2000+i:p.seat==null?1000+i:p.seat;}
+function sorted(people){return people.map((p,i)=>[p,sortKey(p,i)]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);}
+function matcher(q){
+ q=clean(q).replace(/番$/,'');
+ if(!q)return ()=>true;
+ return p=>clean(p.name).includes(q)||(p.seat!=null&&String(p.seat)===q)||(!!p.fixedLabel&&clean(p.fixedLabel).includes(q));
+}
+function table(cols,heads,rows,cls){
+ const t=el('table',{class:cls||null});
+ const cg=el('colgroup');for(const c of cols)cg.append(el('col',{class:c}));
+ const hr=el('tr');heads.forEach((h,i)=>hr.append(el('th',{scope:'col',text:h,class:/hide-sm/.test(cols[i])?'hide-sm':null})));
+ t.append(cg,el('thead',null,hr),el('tbody',null,...rows));
+ return t;
+}
+function empty(root,text){root.replaceChildren(el('p',{class:'emptynote',text}));}
+
+function render(){
+ unlockUi();
+ for(const v of ['drinks','qr','setup']){
+  $('view-'+v).hidden=!S||view!==v;
+  $('tab-'+v).setAttribute('aria-pressed',String(view===v));
+ }
+ $('loading').hidden=!!S;
+ if(!S){lockUi();return;}
+ const st=S.settings,sm=S.summary;
+ $('eventhead').textContent=st.event||'';$('eventhead').hidden=!st.event;
+ const over=sm.lottery-st.seats;
+ $('warn').hidden=!(over>0);
+ if(over>0)$('warn').textContent='くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。「名簿・設定」で席数を増やすか、固定席に変えてください。';
+ for(const b of document.querySelectorAll('.drinkopen')){
+  b.setAttribute('aria-checked',String(!!st.drinkOpen));
+  b.querySelector('.swtext').textContent=st.drinkOpen?'受付中':'締め切り';
+  b.disabled=false;
+  b.setAttribute('aria-label','ドリンクの受付：'+(st.drinkOpen?'受付中（押すと締め切ります）':'締め切り（押すと再開します）'));
+ }
+ $('drinkopenhint').textContent=st.drinkOpen?'参加者はスマホからドリンクを登録・変更できます。':'締め切り中です。参加者はドリンクを変更できません（幹事は「修正」から変更できます）。';
+ renderDrinks();renderQr();renderSetup();renderUpdated();
+ restoreFocus();
+ lockUi();
+}
+function renderUpdated(){
+ const paused=document.hidden;
+ $('updated').classList.toggle('paused',paused);
+ if(!S){$('updatedtext').textContent='—';return;}
+ $('updatedtext').textContent='最終更新 '+(S.updatedAt?String(S.updatedAt).replace(/^\d{4}\/\d{2}\/\d{2}\s*/,''):new Date(lastLoad).toLocaleTimeString('ja-JP'))+(paused?'（自動更新は停止中）':'');
+}
+
+function renderDrinks(){
+ const sm=S.summary,root=$('drinkcounts');root.replaceChildren();
+ for(const o of sm.orders)root.append(el('div',{class:'drinkcount'+(o.count?'':' zero')},el('span',{text:o.name}),el('strong',null,String(o.count),el('small',{text:'杯'}))));
+ root.append(el('div',{class:'drinkcount meta'},el('span',{text:'未定'}),el('strong',null,String(sm.undecided),el('small',{text:'人'}))));
+ root.append(el('div',{class:'drinkcount meta'},el('span',{text:'未登録'}),el('strong',null,String(sm.none),el('small',{text:'人'}))));
+ root.append(el('div',{class:'drinkcount total'},el('span',{text:'合計'}),el('strong',null,String(sm.total),el('small',{text:'人'}))));
+ const cups=sm.orders.reduce((n,o)=>n+o.count,0);
+ $('drinktotal').textContent='注文が決まったドリンク '+cups+'杯 ／ 未定 '+sm.undecided+'人 ／ 未登録 '+sm.none+'人 ／ 名簿 '+sm.total+'人（抽選席 '+sm.lottery+'人・固定席 '+sm.fixed+'人）';
+ $('csv').disabled=!S.people.length;
+ const hit=matcher($('drinksearch').value),only=$('onlynone').checked;
+ const list=sorted(S.people).filter(p=>hit(p)&&(!only||!p.drink));
+ $('drinkcountline').textContent=S.people.length?list.length+'人を表示中':'';
+ const box=$('drinkrows');
+ if(!S.people.length){empty(box,'まだ名簿がありません。「名簿・設定」から登録してください。');return;}
+ if(!list.length){empty(box,only?'未登録の方はいません。':'該当する方はいません。');return;}
+ const rows=list.map(p=>el('tr',null,
+  el('td',{class:'seat'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:seatText(p)}),
+  el('td',{text:p.name}),
+  el('td',{class:p.drink?null:'muted',text:drinkText(p)}),
+  el('td',{class:'time hide-sm',text:timeText(p.drinkAt),title:p.drinkAt||null}),
+  el('td',{class:'act'},el('button',{class:'small',text:'修正','aria-label':p.name+'さんを修正',onclick:()=>openEdit(p.id),'data-fk':'d:edit:'+p.id}))));
+ box.replaceChildren(table(['c-seat','c-name','c-drink','c-time hide-sm','c-act'],['席','お名前','ドリンク','登録時刻','修正'],rows,'compact'));
+}
+
+function renderQr(){
+ const st=S.settings,sm=S.summary;
+ $('qrevent').textContent=st.event||'（未設定）';
+ $('qrurlwarn').hidden=!!st.appUrl;
+ $('qrurlwarn').textContent=st.devUrl?'いま自動で取得できたのはテスト用のURL（/dev で終わるもの）です。このURLは参加者が開けないため、QRコードを作れません。Apps Script の「デプロイ」→「デプロイを管理」にある /exec で終わるURLを、「名簿・設定」の「QR用のURL」に貼り付けて保存してください。':'QRコードに入れるWebアプリのURLが取得できません。先にWebアプリとしてデプロイするか、「名簿・設定」の「QR用のURL」を設定してください。';
+ const pending=S.people.filter(p=>p.kind==='lottery'&&p.seat==null).length;
+ const stats=$('qrstats');stats.replaceChildren(
+  el('span',{class:'tag ok',text:'席が決まった方 '+sm.seated+' / '+sm.lottery+'人'}),
+  el('span',{class:'tag'+(pending?' wait':''),text:'未抽選 '+pending+'人'}),
+  el('span',{class:'tag',text:'空いている席 '+sm.seatsLeft+'席'}),
+  el('span',{class:'tag',text:'固定席 '+sm.fixed+'人'}));
+ $('printbtn').disabled=!st.appUrl||!S.people.length;
+ $('linkcsv').disabled=!st.appUrl||!S.people.length;
+ $('drawall').disabled=!pending;
+ const box=$('qrrows');
+ if(!S.people.length){empty(box,'まだ名簿がありません。「名簿・設定」から登録してください。');return;}
+ const hit=matcher($('qrsearch').value),list=sorted(S.people).filter(hit);
+ if(!list.length){empty(box,'該当する方はいません。');return;}
+ const rows=list.map(p=>{
+  const acts=el('div',{class:'actions'},
+   el('button',{class:'small',text:'QR表示',disabled:!st.appUrl,'data-fk':'q:show:'+p.id,'aria-label':p.name+'さんのQRコードを表示',onclick:()=>openQr(p.id)}),
+   p.kind==='lottery'&&p.seat==null?el('button',{class:'small',text:'代わりに引く','data-fk':'q:draw:'+p.id,'aria-label':p.name+'さんの代わりにくじを引く',disabled:!sm.seatsLeft,onclick:()=>drawOne(p.id)}):null);
+  const tag=p.kind==='fixed'?el('span',{class:'tag',text:'固定席'}):p.seat==null?el('span',{class:'tag wait',text:'未抽選'}):el('span',{class:'tag ok',text:p.seat+'番'});
+  return el('tr',null,
+   el('td',{class:'seat hide-sm'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:p.kind==='fixed'?(p.fixedLabel||'—'):p.seat==null?'—':String(p.seat)}),
+   el('td',{text:p.name}),
+   el('td',null,tag),
+   el('td',{class:(p.drink?'':'muted ')+'hide-sm',text:drinkText(p)}),
+   el('td',{class:'act'},acts));
+ });
+ box.replaceChildren(table(['c-seat hide-sm','c-name','c-state','c-drink hide-sm','c-qract'],['席','お名前','状態','ドリンク','操作'],rows,'compact'));
+}
+
+/* 設定欄：入力中・未保存のものは上書きしない */
+const settingFields={event:()=>S.settings.event||'',seats:()=>String(S.settings.seats),drinks:()=>(S.settings.drinks||[]).join('\n'),baseurl:()=>S.settings.baseUrl||''};
+const saveBtn={event:'eventsave',seats:'seatssave',drinks:'drinkssave',baseurl:'baseurlsave'};
+for(const id in settingFields)$(id).addEventListener('input',()=>{$(id).dataset.dirty='1';$(saveBtn[id]).classList.add('dirty');});
+function syncField(id,force){
+ const f=$(id);
+ if(force){delete f.dataset.dirty;$(saveBtn[id]).classList.remove('dirty');}
+ if(!f.dataset.dirty&&(force||document.activeElement!==f))f.value=settingFields[id]();
+}
+function renderSetup(){
+ const st=S.settings,sm=S.summary;
+ for(const id in settingFields)syncField(id,false);
+ const maxSeat=S.people.reduce((m,p)=>p.seat!=null?Math.max(m,p.seat):m,0);
+ $('seatsstate').textContent='いまの設定：抽選席 '+st.seats+'席（決まっている席 '+sm.seated+'席'+(maxSeat?'・最大 '+maxSeat+'番':'')+'）／ 固定席 '+sm.fixed+'人';
+ $('appurl').textContent=st.appUrl?'QRに使うURL：'+st.appUrl:st.devUrl?'テスト用のURL（/dev）は参加者が開けないため使えません。/exec で終わるURLを下に入力してください。':'QRに使うURLがまだありません（Webアプリとしてデプロイしてください）。';
+ $('rostercount').textContent='名簿 '+sm.total+'人（抽選席 '+sm.lottery+'人・固定席 '+sm.fixed+'人）';
+ const box=$('roster');
+ if(!S.people.length){empty(box,'まだ名簿がありません。「名簿の一括登録」から追加してください。');return;}
+ const rows=S.people.map(p=>el('tr',null,
+  el('td',{text:p.name}),
+  el('td',null,el('span',{class:'tag',text:p.kind==='fixed'?'固定席':'抽選席'})),
+  el('td',{class:p.seat==null&&p.kind!=='fixed'?'muted':null,text:p.kind==='fixed'?(p.fixedLabel||'—'):p.seat==null?'未抽選':p.seat+'番'}),
+  el('td',{class:(p.drink?'':'muted ')+'hide-sm',text:drinkText(p)}),
+  el('td',{class:'act'},el('button',{class:'small',text:'修正','aria-label':p.name+'さんを修正',onclick:()=>openEdit(p.id),'data-fk':'s:edit:'+p.id}))));
+ box.replaceChildren(table(['c-name','c-kind','c-seat','c-drink hide-sm','c-act'],['お名前','区分','席','ドリンク','修正'],rows,'compact'));
+}
+
+/* 操作 */
+for(const v of ['drinks','qr','setup'])$('tab-'+v).onclick=()=>{view=v;render();window.scrollTo(0,0);};
+$('refresh').onclick=()=>refresh(true);
+$('drinksearch').oninput=renderDrinksOnly;
+$('onlynone').onchange=renderDrinksOnly;
+$('qrsearch').oninput=()=>{if(S){renderQr();restoreFocus();lockUi();}};
+function renderDrinksOnly(){if(S){renderDrinks();restoreFocus();lockUi();}}
+for(const b of document.querySelectorAll('.drinkopen'))b.onclick=()=>{
+ const next=!S.settings.drinkOpen;
+ act('adminSaveSettings',[{drinkOpen:next}],()=>ok(next?'ドリンクの受付を再開しました。':'ドリンクの受付を締め切りました。'));
+};
+function saveSetting(id,patch,msg){act('adminSaveSettings',[patch],()=>{syncField(id,true);qrCache.clear();ok(msg);});}
+$('eventsave').onclick=()=>{const v=tidy($('event').value);saveSetting('event',{event:v},v?'会の名前を保存しました。':'会の名前を消しました。');};
+$('seatssave').onclick=()=>{const v=Number($('seats').value);saveSetting('seats',{seats:v},'抽選席を'+v+'席にしました。');};
+$('drinkssave').onclick=()=>{const v=$('drinks').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);saveSetting('drinks',{drinks:v},'ドリンクメニューを保存しました。');};
+$('baseurlsave').onclick=()=>{const v=$('baseurl').value.trim();saveSetting('baseurl',{baseUrl:v},v?'QR用のURLを保存しました。':'QR用のURLを自動に戻しました。');};
+for(const id of ['event','seats','baseurl'])$(id).addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$(saveBtn[id]).click();}});
+
+function splitNames(text){return String(text).split(/[\n\r,;\t、，；]+/).map(s=>tidy(s)).filter(Boolean);}
+$('bulkadd').onclick=()=>{
+ const names=splitNames($('bulk').value),kind=document.querySelector('input[name=bulkkind]:checked').value;
+ if(!names.length){$('bulkstate').textContent='お名前が読み取れませんでした。1行に1名で入力してください。';return;}
+ act('adminAddPeople',[names,kind],r=>{
+  $('bulk').value='';
+  const added=(r&&r.added)||[],skipped=(r&&r.skipped)||[];
+  const msg=added.length+'人を名簿に追加しました。'+(skipped.length?'追加しなかった方：'+skipped.join('、'):'');
+  $('bulkstate').textContent=msg;ok(msg);
+ });
+};
+async function reset(scope,title,msg,done){
+ if(await ask(title,msg,'消す',true))act('adminReset',[scope],()=>ok(done));
+}
+$('resetseats').onclick=()=>reset('seats','席だけ消す','全員の席と抽選日時を消して、未抽選に戻します。名簿とドリンクはそのままです。元に戻せません。','席を消しました。');
+$('resetdrinks').onclick=()=>reset('drinks','ドリンクだけ消す','全員のドリンクと登録日時を消します。名簿と席はそのままです。元に戻せません。','ドリンクを消しました。');
+$('resetall').onclick=()=>reset('all','名簿ごと消す','名簿・席・ドリンクをすべて消します（設定は残ります）。配ったQRコードも使えなくなります。元に戻せません。','名簿ごと消しました。');
+
+async function drawOne(id){
+ const p=person(id);if(!p)return;
+ if(!await ask('代わりにくじを引く',p.name+'さんの席を、この画面で抽選します。','くじを引く'))return;
+ act('adminDrawOne',[id],()=>{const q=person(id);ok(q&&q.seat!=null?q.name+'さんの席は '+q.seat+'番 です。':'抽選しました。');});
+}
+$('drawall').onclick=async()=>{
+ const pending=S.people.filter(p=>p.kind==='lottery'&&p.seat==null).length;
+ if(!pending)return;
+ if(!await ask('席をまとめて決める','まだ席が決まっていない '+pending+'人の席を、いまここでまとめて抽選します。スマホで引く演出は見られなくなります（結果の表示はできます）。','まとめて決める'))return;
+ act('adminDrawAll',[],r=>{
+  const n=(r&&r.count)||0,left=S.people.filter(p=>p.kind==='lottery'&&p.seat==null).length;
+  const msg=n+'人の席を決めました。'+(left?'空いている席が足りず、'+left+'人は決まっていません。':'');
+  $('qrstate').textContent=msg;ok(msg);
+ });
+};
+
+/* 修正ダイアログ */
+function openEdit(id){
+ const p=person(id);if(!p)return;
+ editing={id,name:p.name,kind:p.kind,drink:p.drink||null};
+ $('edittitle').textContent=p.name+' さん';
+ $('editname').value=p.name;$('editkind').value=p.kind;
+ const menu=S.settings.drinks||[],sel=$('editdrink');
+ sel.replaceChildren(el('option',{value:'',text:'未登録'}),...menu.map(d=>el('option',{value:'m:'+d,text:d})),el('option',{value:'other',text:'その他（入力）'}),el('option',{value:'undecided',text:'未定'}));
+ const d=p.drink;
+ sel.value=!d?'':d==='未定'?'undecided':menu.includes(d)?'m:'+d:'other';
+ $('editother').value=d&&d!=='未定'&&!menu.includes(d)?d:'';
+ $('editclearseat').checked=false;
+ $('clearseatwrap').hidden=!(p.kind==='lottery'&&p.seat!=null);
+ $('clearseatlabel').textContent=p.seat!=null?'席（'+p.seat+'番）を空きに戻す':'席を空きに戻す';
+ toggleOther();kindHint();
+ $('editerror').hidden=true;
+ $('editdialog').showModal();
+}
+function toggleOther(){const o=$('editdrink').value==='other';$('editotherwrap').hidden=!o;$('editother').required=o;}
+function kindHint(){
+ const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
+ $('editkindhint').textContent=p&&toFixed&&p.seat!=null?'固定席に変えると、'+p.seat+'番は空きに戻ります。':toFixed?'固定席の方はくじを引きません。ドリンクだけ登録できます。':'くじを引いて席を決める方です。';
+ $('clearseatwrap').hidden=!(p&&p.kind==='lottery'&&p.seat!=null&&!toFixed);
+}
+$('editdrink').onchange=()=>{toggleOther();if($('editdrink').value==='other')$('editother').focus();};
+$('editkind').onchange=kindHint;
+$('editcancel').onclick=()=>$('editdialog').close();
+$('editform').onsubmit=e=>{
+ e.preventDefault();
+ if(!editing)return;
+ const v=$('editdrink').value,patch={};
+ const drink=v===''?null:v==='undecided'?'未定':v==='other'?clean($('editother').value):v.slice(2);
+ if(v==='other'&&!drink){$('editerror').textContent='ドリンク名を入力してください。';$('editerror').hidden=false;return;}
+ const name=tidy($('editname').value);
+ if(name!==editing.name)patch.name=name;
+ if($('editkind').value!==editing.kind)patch.kind=$('editkind').value;
+ if(drink!==editing.drink)patch.drink=drink;
+ if($('editclearseat').checked&&!$('clearseatwrap').hidden)patch.clearSeat=true;
+ if(!Object.keys(patch).length){$('editdialog').close();return;}
+ const id=editing.id;
+ act('adminUpdatePerson',[id,patch],()=>{$('editdialog').close();ok(name+'さんを修正しました。');});
+};
+$('editdelete').onclick=async()=>{
+ if(!editing)return;
+ const {id,name}=editing;
+ if(!await ask('名簿から削除',name+'さんを名簿から削除します。席とドリンクの記録も消え、配ったQRコードは使えなくなります。','削除する',true))return;
+ act('adminDeletePerson',[id],()=>{$('editdialog').close();ok(name+'さんを名簿から削除しました。');});
+};
+$('editdialog').addEventListener('close',()=>{editing=null;});
+
+/* QRダイアログ */
+function openQr(id){
+ const p=person(id);if(!p)return;
+ qrId=id;fillQr(p);$('qrerror').hidden=true;
+ if(!$('qrdialog').open)$('qrdialog').showModal();
+}
+function fillQr(p){
+ const link=linkFor(p),box=$('qrbox');
+ $('qrtitle').textContent=p.name+' さん';
+ $('qrsub').textContent='状態：'+stateText(p)+' ／ ドリンク：'+drinkText(p);
+ box.replaceChildren();
+ const svg=link?qrSvgCached(link):null;
+ if(svg)box.innerHTML=svg;
+ else box.append(el('p',{class:'emptynote',text:link?'QRコードに収まりません。QR用のURLを短くしてください。':'QRに使うURLがありません。先にWebアプリとしてデプロイしてください。'}));
+ $('qrhint').textContent='スマホのカメラで読み取ると、くじとドリンクの画面が開きます。';
+ $('qrlink').value=link;
+ $('qrcopy').disabled=!link;
+ if(link){$('qropen').href=link;$('qropen').removeAttribute('aria-disabled');}else{$('qropen').removeAttribute('href');$('qropen').setAttribute('aria-disabled','true');}
+}
+$('qrclose').onclick=()=>$('qrdialog').close();
+$('qrdialog').addEventListener('close',()=>{qrId=null;});
+$('qrcopy').onclick=async()=>{
+ const v=$('qrlink').value;if(!v)return;
+ try{await navigator.clipboard.writeText(v);$('qrhint').textContent='リンクをコピーしました。';}
+ catch(e){
+  $('qrlink').focus();$('qrlink').select();
+  let done=false;try{done=document.execCommand('copy');}catch(e2){}
+  $('qrhint').textContent=done?'リンクをコピーしました。':'コピーできませんでした。リンク欄を選んでコピーしてください。';
+ }
+};
+$('qrreissue').onclick=async()=>{
+ const id=qrId,p=person(id);if(!p)return;
+ if(!await ask('QRを作り直す',p.name+'さんのQRコードを新しくします。前のQRコード（印刷済みのカードを含む）は使えなくなります。席とドリンクはそのままです。','作り直す',true))return;
+ act('adminReissueToken',[id],()=>{const q=person(id);if(q&&$('qrdialog').open&&qrId===id){fillQr(q);$('qrhint').textContent='新しいQRコードにしました。';}ok(p.name+'さんのQRコードを作り直しました。');});
+};
+
+/* 印刷・CSV */
+$('printbtn').onclick=()=>{
+ if(!S||!S.settings.appUrl)return;
+ const root=$('printsheet');root.replaceChildren();
+ let missing=0;
+ for(const p of S.people){
+  const link=linkFor(p),svg=link?qrSvgCached(link):null;
+  if(!svg){missing++;continue;}
+  const card=el('div',{class:'qrcard'});
+  if(S.settings.event)card.append(el('p',{class:'ev',text:S.settings.event}));
+  card.append(el('p',{class:'nm',text:p.name+' さん'}));
+  const holder=document.createElement('div');holder.innerHTML=svg;card.append(holder.firstElementChild);
+  card.append(el('p',{class:'note',text:'スマホのカメラで読み取って、くじを引いてドリンクを選んでください'}));
+  root.append(card);
+ }
+ if(!root.children.length){showError(Error('印刷できるQRコードがありません。'));return;}
+ $('qrstate').textContent=root.children.length+'人分のカードを印刷します。'+(missing?missing+'人分はQRコードを作れませんでした。':'');
+ window.print();
+};
+function csvCell(v){v=String(v);if(/^[\s]*[=+@-]/.test(v))v="'"+v;return '"'+v.replace(/"/g,'""')+'"';}
+function downloadCsv(rows,filename){
+ const blob=new Blob(['﻿'+rows.map(r=>r.map(csvCell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});
+ const url=URL.createObjectURL(blob),a=el('a',{href:url,download:filename});
+ document.body.append(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function stamp(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'-'+z(d.getHours())+z(d.getMinutes());}
+$('csv').onclick=()=>{
+ const rows=[['席番号','区分','お名前','ドリンク','ドリンク登録時刻']];
+ for(const p of sorted(S.people))rows.push([p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,p.drink||'未登録',p.drinkAt||'']);
+ downloadCsv(rows,'席くじ-ドリンク一覧-'+stamp()+'.csv');
+ ok('CSVを保存しました。');
+};
+$('linkcsv').onclick=()=>{
+ const rows=[['お名前','区分','席番号','リンク']];
+ for(const p of sorted(S.people))rows.push([p.name,p.kind==='fixed'?'固定席':'抽選席',p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,linkFor(p)]);
+ downloadCsv(rows,'席くじ-リンク一覧-'+stamp()+'.csv');
+ ok('リンク一覧を保存しました。');
+};
+
+/* 起動 */
+render();
+if(typeof google==='undefined'||!google.script||!google.script.url){
+ $('loading').hidden=true;showError(Error('この画面は Google Apps Script の Webアプリとして開いてください。'));
+}else{
+ google.script.url.getLocation(loc=>{
+  key=String((loc&&loc.parameter&&loc.parameter.admin)||'');
+  firstLoad();
+ });
+}
+function firstLoad(){
+ $('loadingtext').textContent='読み込み中…';$('retry').hidden=true;$('loading').classList.remove('failed');
+ refresh(true).then(()=>{if(S){$('status').textContent='';return;}$('loadingtext').textContent='読み込めませんでした。';$('retry').hidden=false;$('loading').classList.add('failed');});
+}
+$('retry').onclick=firstLoad;
+</script></body></html>

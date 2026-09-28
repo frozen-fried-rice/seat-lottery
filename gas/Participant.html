@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ja"><head><base target="_top"><meta charset="utf-8"><meta name="robots" content="noindex"><title>席くじ</title><style>
+:root{font-family:system-ui,-apple-system,'Noto Sans JP',sans-serif;color:#182d4a;background:#f3f6fb;font-size:16px}
+*{box-sizing:border-box}
+html,body{background:#f3f6fb}
+body{margin:0;min-height:100vh;min-height:100svh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px 16px}
+main,.card{width:100%;max-width:420px;background:#fff;border:1px solid #dfe6ef;border-radius:24px;padding:30px 22px;text-align:center;box-shadow:0 12px 40px #213a6314}
+.event{font-size:14px;font-weight:700;letter-spacing:.12em;color:#597089;margin:0 0 6px;overflow-wrap:anywhere}
+h1{font-size:28px;margin:0 0 6px;overflow-wrap:anywhere;line-height:1.35}
+h2{font-size:20px;margin:0 0 14px;color:#193961}
+.lead{color:#617087;font-size:15px;line-height:1.9;margin:14px 0 22px}
+button{cursor:pointer;border:0;border-radius:14px;font:inherit;font-weight:700;min-height:56px;padding:14px 22px;background:#e9eff8;color:#183659;touch-action:manipulation}
+button:focus-visible,input:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+button:disabled{cursor:default;opacity:.55}
+.primary{background:#2255aa;color:#fff;font-size:20px;min-height:66px;width:100%;box-shadow:0 6px 14px #2255aa26}
+.primary:active:not(:disabled){transform:translateY(1px)}
+.number{font-size:110px;line-height:1.1;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.05em;color:#193961;margin:10px 0 4px;min-height:124px;display:flex;align-items:center;justify-content:center;gap:4px}
+.number small{font-size:26px;letter-spacing:0;font-weight:700}
+.rolling{color:#8fa3bf}
+.pop{animation:pop .45s ease-out}
+@keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+.who{font-size:19px;font-weight:700;margin:0;overflow-wrap:anywhere}
+.hint{color:#617087;font-size:14px;line-height:1.9}
+.again{margin-top:18px;font-size:14px;min-height:44px;padding:10px 16px;background:transparent;color:#5b708c}
+.fixedtag{display:inline-block;background:#193961;color:#fff;border-radius:10px;padding:2px 12px;margin:0 2px}
+.err{background:#fff0ee;color:#a02a18;border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.7;margin:0 0 16px;text-align:left;overflow-wrap:anywhere}
+.loading{color:#617087;font-size:16px;margin:0}
+.drinks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.drinks button{min-height:58px;padding:10px 8px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;border:2px solid transparent}
+.drinks button.sel{background:#193961;color:#fff}
+.drinks .wide{grid-column:1/-1}
+.drinks .later{background:#fff;border-color:#cfd9e6;color:#44566f}
+.drinks .later.sel{background:#193961;border-color:#193961;color:#fff}
+.other{display:flex;gap:8px;margin-top:10px}
+.other input{flex:1;min-width:0;font:inherit;font-size:17px;min-height:56px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff}
+.other button{background:#2255aa;color:#fff;padding:10px 18px;flex:none}
+.msg{margin:14px 0 0;font-size:15px;line-height:1.8;min-height:1.8em;overflow-wrap:anywhere}
+.msg.ok{color:#1d6b3a;font-weight:700}
+.msg.ng{color:#a02a18;font-weight:700}
+.current{font-size:22px;font-weight:800;color:#193961;margin:8px 0 0;overflow-wrap:anywhere}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[hidden]{display:none!important}
+@media (max-width:340px){.drinks{grid-template-columns:1fr}.number{font-size:92px}}
+@media (prefers-reduced-motion:reduce){.pop{animation:none}}
+</style></head><body>
+<main id="main">
+ <p class="loading" id="loading" role="status">読み込み中…</p>
+ <div id="bad" hidden>
+  <h1>席の情報が読み取れません</h1>
+  <p class="err" id="badmsg" role="alert"></p>
+  <p class="lead">お手数ですが、受付でお渡ししたQRコードをもう一度読み取ってください。<br>うまくいかないときは受付にお声がけください。</p>
+  <button id="reload">もう一度読み込む</button>
+ </div>
+ <div id="intro" hidden>
+  <p class="event" data-ev></p>
+  <h1 id="name"></h1>
+  <p class="lead">ボタンを押すと、あなたのお席が決まります。</p>
+  <p class="err" id="drawerr" role="alert" hidden></p>
+  <button class="primary" id="draw">くじを引く</button>
+ </div>
+ <div id="result" hidden>
+  <p class="event" data-ev></p>
+  <p class="who" id="name2"></p>
+  <div class="number" id="number"></div>
+  <p class="sr" id="announce" role="status"></p>
+  <p class="hint" id="resulthint" hidden>テーブルの番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
+  <button class="again" id="again" hidden>もう一度演出を見る</button>
+ </div>
+ <div id="fixed" hidden>
+  <p class="event" data-ev></p>
+  <h1 id="fixedname"></h1>
+  <p class="lead">お席はご案内します。<br>くじを引く必要はありません。</p>
+ </div>
+</main>
+<section class="card" id="drinkbox" hidden aria-labelledby="drinkh">
+ <h2 id="drinkh">1杯目のドリンク</h2>
+ <div id="drinkopen">
+  <div class="drinks" id="drinklist"></div>
+  <form class="other" id="otherform" hidden>
+   <label class="sr" for="otherinput">ドリンク名</label>
+   <input id="otherinput" type="text" maxlength="30" autocomplete="off" enterkeyhint="done" placeholder="例：ジンジャーエール">
+   <button type="submit" id="othersave">決定</button>
+  </form>
+  <p class="msg" id="drinkmsg" role="status" aria-live="polite"></p>
+ </div>
+ <div id="drinkclosed" hidden>
+  <p class="lead" style="margin:0">ドリンクの受付は締め切りました。</p>
+  <p class="hint" style="margin:10px 0 0">現在の登録</p>
+  <p class="current" id="drinkcurrent"></p>
+ </div>
+</section>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const UNDECIDED='未定';
+const reduced=()=>{try{return window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}};
+const clean=t=>String(t==null?'':t).normalize('NFKC').trim().replace(/\s+/g,' ');
+let token='',view=null,rolling=null,drawing=false,saving=false,otherOpen=false;
+
+const NET_ERR='通信に失敗しました。電波の良い場所で、もう一度お試しください。';
+// サーバーのエラー文は「Error: 」などが付いて届くことがあるので取り除きます
+function errText(e){return String(e&&e.message?e.message:e||NET_ERR).replace(/^(?:Uncaught\s+)?(?:Error|Exception|ScriptError|TypeError):\s*/,'')||NET_ERR;}
+// 混み合っているとき（受付の一斉抽選など）は、少し待って自動でやり直します（抽選・ドリンク登録は何度呼んでも同じ結果になります）
+function run(fn,args,ok,ng,tries){
+ tries=tries||0;
+ const fail=m=>{if(/混み合って/.test(m)&&tries<3)setTimeout(()=>run(fn,args,ok,ng,tries+1),1200*(tries+1)+Math.floor(Math.random()*800));else ng(m);};
+ try{
+  let r=google.script.run.withSuccessHandler(ok).withFailureHandler(e=>fail(errText(e)));
+  r[fn].apply(r,args);
+ }catch(e){ng(NET_ERR);}
+}
+function show(id){for(const s of ['loading','bad','intro','result','fixed'])$(s).hidden=s!==id;}
+function bad(msg){stopRoll();show('bad');$('badmsg').textContent=msg||'QRコードが無効です。受付にお声がけください。';$('drinkbox').hidden=true;}
+function setCommon(v){
+ document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=v.event||'';e.hidden=!v.event;});
+ $('name').textContent=v.name+' さん';
+ $('name2').textContent=v.name+' さんのお席';
+ const f=$('fixedname');f.replaceChildren(document.createTextNode(v.name+' さんは '));
+ const tag=document.createElement('span');tag.className='fixedtag';tag.textContent='固定席';
+ f.append(tag,document.createTextNode(' です'));
+}
+function showNumber(text,isRolling){
+ const n=$('number');
+ // くるくる回っている数字は読み上げません（結果だけを #announce で知らせます）
+ if(isRolling)n.setAttribute('aria-hidden','true');else n.removeAttribute('aria-hidden');
+ n.replaceChildren(document.createTextNode(text));
+ if(!isRolling){const small=document.createElement('small');small.textContent='番';n.append(small);}
+ n.className='number'+(isRolling?' rolling':(reduced()?'':' pop'));
+}
+function stopRoll(){if(rolling){clearInterval(rolling);rolling=null;}}
+function startRoll(top){
+ stopRoll();$('announce').textContent='抽選しています';
+ top=Math.max(top||0,20);
+ const tick=()=>showNumber(String(1+Math.floor(Math.random()*top)),true);
+ tick();rolling=setInterval(tick,80);
+}
+function showSeat(v){
+ stopRoll();show('result');
+ showNumber(String(v.seat),false);
+ $('announce').textContent=v.name+' さんのお席は '+v.seat+'番 です。';
+ $('resulthint').hidden=false;$('again').hidden=false;
+}
+function load(){
+ show('loading');$('drinkbox').hidden=true;
+ run('participantGet',[token],v=>render(v,true),msg=>bad(msg));
+}
+// 画面全体をサーバーの状態から描き直す
+function render(v,full){
+ view=v;setCommon(v);
+ if(full){
+  if(v.kind==='fixed')show('fixed');
+  else if(v.seat!=null)showSeat(v);
+  else{show('intro');$('draw').disabled=false;$('draw').textContent='くじを引く';$('drawerr').hidden=true;}
+ }
+ renderDrink(v.kind==='fixed'||v.seat!=null);
+}
+
+/* ---- くじ ---- */
+function draw(){
+ if(drawing||!view)return;
+ drawing=true;
+ const btn=$('draw');btn.disabled=true;$('drawerr').hidden=true;
+ const t0=Date.now(),min=reduced()||document.hidden?0:1500;
+ let got=null,timer=null;
+ if(min){
+  $('name2').textContent=view.name+' さんのお席';
+  show('result');$('resulthint').hidden=true;$('again').hidden=true;
+  startRoll(view.seatsLeft);
+ }else btn.textContent='抽選しています…';
+ const finish=()=>{
+  if(!got)return;
+  drawing=false;view=got;setCommon(got);
+  if(got.kind==='fixed'){stopRoll();show('fixed');}
+  else showSeat(got);
+  renderDrink(true);
+ };
+ run('participantDraw',[token],v=>{
+  got=v;
+  const wait=min-(Date.now()-t0);
+  if(wait>0)timer=setTimeout(finish,wait);else finish();
+ },msg=>{
+  if(timer)clearTimeout(timer);
+  drawing=false;stopRoll();$('announce').textContent='';show('intro');
+  const showErr=()=>{const e=$('drawerr');e.textContent=msg;e.hidden=false;btn.disabled=false;btn.textContent='もう一度くじを引く';};
+  showErr();
+  // 幹事が区分を変えた・QRを作り直した などサーバー側が変わったときは、最新の状態を読み直して画面を切り替えます
+  if(msg!==NET_ERR&&!/混み合って/.test(msg)){
+   btn.disabled=true;
+   run('participantGet',[token],v=>{render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m=>{if(/QRコード/.test(m))bad(m);else btn.disabled=false;});
+  }
+ });
+}
+function replay(){
+ if(!view||view.seat==null||rolling)return;
+ if(reduced()||document.hidden){showSeat(view);return;}
+ $('again').hidden=true;
+ startRoll(view.seat);
+ setTimeout(()=>showSeat(view),1500);
+}
+
+/* ---- ドリンク ---- */
+function isOther(d){return d!=null&&d!==UNDECIDED&&!(view.drinks||[]).includes(d);}
+function drinkLabel(d){return d===UNDECIDED?'未定（あとで決める）':d;}
+function renderDrink(visible){
+ const box=$('drinkbox');box.hidden=!visible;
+ if(!visible||!view)return;
+ const d=view.drink==null?null:String(view.drink);
+ if(!view.drinkOpen){
+  $('drinkopen').hidden=true;$('drinkclosed').hidden=false;
+  $('drinkcurrent').textContent=d==null?'登録はありません':drinkLabel(d);
+  return;
+ }
+ $('drinkopen').hidden=false;$('drinkclosed').hidden=true;
+ const list=$('drinklist'),items=[];
+ for(const m of view.drinks||[]){
+  const b=document.createElement('button');b.type='button';b.textContent=m;
+  b.className=d===m?'sel':'';b.setAttribute('aria-pressed',String(d===m));
+  b.onclick=()=>{otherOpen=false;syncOther();save(m);};
+  items.push(b);
+ }
+ const o=document.createElement('button');o.type='button';o.id='otherbtn';
+ o.textContent=isOther(d)?'その他：'+d:'その他（入力）';
+ o.className='wide'+(isOther(d)?' sel':'');o.setAttribute('aria-pressed',String(isOther(d)));
+ o.setAttribute('aria-expanded',String(otherOpen));
+ o.onclick=()=>{otherOpen=!otherOpen;syncOther();if(otherOpen){const i=$('otherinput');if(!i.value&&isOther(view.drink))i.value=view.drink;i.focus();}};
+ items.push(o);
+ const l=document.createElement('button');l.type='button';l.textContent='あとで決める（未定）';
+ l.className='wide later'+(d===UNDECIDED?' sel':'');l.setAttribute('aria-pressed',String(d===UNDECIDED));
+ l.onclick=()=>{otherOpen=false;syncOther();save(UNDECIDED);};
+ items.push(l);
+ list.replaceChildren(...items);
+ syncOther();setBusy(saving);
+ if(!saving&&!$('drinkmsg').dataset.keep){
+  msg(d==null?'':(d===UNDECIDED?'「未定」で登録しています。決まったら選び直してください。':'「'+d+'」で登録済みです。変更もできます。'),'');
+ }
+}
+function syncOther(){
+ $('otherform').hidden=!otherOpen;
+ const o=$('otherbtn');if(o)o.setAttribute('aria-expanded',String(otherOpen));
+}
+function setBusy(b){
+ document.querySelectorAll('#drinkbox button,#drinkbox input').forEach(e=>e.disabled=b);
+}
+function msg(text,cls,keep){
+ const m=$('drinkmsg');m.textContent=text;m.className='msg'+(cls?' '+cls:'');
+ if(keep)m.dataset.keep='1';else delete m.dataset.keep;
+}
+function save(drink){
+ if(saving||!view)return;
+ drink=clean(drink);
+ if(!drink){msg('ドリンク名を入力してください。','ng',true);$('otherinput').focus();return;}
+ if(drink.length>30){msg('ドリンク名は30文字以内で入力してください。','ng',true);return;}
+ saving=true;setBusy(true);msg('保存しています…','',true);
+ run('participantSetDrink',[token,drink],v=>{
+  saving=false;view=v;
+  if(!isOther(v.drink))$('otherinput').value='';
+  otherOpen=false;
+  msg((v.drink===UNDECIDED?'「未定」':'「'+v.drink+'」')+'で登録しました。変更もできます。','ok',true);
+  renderDrink(true);
+ },m=>{
+  saving=false;setBusy(false);msg(m,'ng',true);
+  if(/締め切/.test(m))run('participantGet',[token],v=>{render(v,false);},()=>{});
+  else if(/QRコード/.test(m))run('participantGet',[token],v=>{render(v,true);},bad);
+ });
+}
+$('otherform').onsubmit=e=>{e.preventDefault();save($('otherinput').value);};
+$('draw').onclick=draw;
+$('again').onclick=replay;
+$('reload').onclick=start;
+
+function start(){
+ show('loading');
+ try{
+  google.script.url.getLocation(loc=>{
+   const p=(loc&&loc.parameter)||{};
+   token=typeof p.t==='string'?p.t.trim():'';
+   if(!token){bad('QRコードが無効です。受付にお声がけください。');return;}
+   load();
+  });
+ }catch(e){bad('この画面を開けませんでした。受付でお渡ししたQRコードから開いてください。');}
+}
+start();
+</script></body></html>

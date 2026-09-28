@@ -1,0 +1,470 @@
+'use strict';
+// GAS 版の通しテスト（Playwright / Chromium）。
+// gas/Code.gs を test/gas-mock.cjs で Node 上に動かし、doGet が返す HTML を小さな HTTP サーバーで配信します。
+// ページには偽の google.script（url.getLocation / run）を入れ、run の呼び出しは page.exposeFunction 経由で
+// Node 側の公開関数（末尾「_」以外）に橋渡しします。実行: node test/gas-e2e.cjs
+const assert = require('node:assert/strict');
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const { createGasContext, callServer } = require('./gas-mock.cjs');
+
+let playwright;
+try { playwright = require('/opt/node22/lib/node_modules/playwright'); } catch (e) { playwright = require('playwright'); }
+
+const SHOTS = process.env.SHOTS_DIR || '/tmp/claude-0/-home-user-seat-lottery/147f18ee-7494-58a3-a367-a902b44fa4fa/scratchpad/shots';
+fs.mkdirSync(SHOTS, { recursive: true });
+
+/* ---------- GAS（Node 側） ---------- */
+const ctx = createGasContext();
+ctx.setup();
+const KEY = ctx.__mock.props.ADMIN_KEY;
+assert.ok(typeof KEY === 'string' && KEY.length >= 24, 'setup() で ADMIN_KEY が作られる');
+const calls = [];
+const state = () => callServer(ctx, 'adminGetState', [KEY]);
+const byName = name => { const p = state().people.find(x => x.name === name); assert.ok(p, name + ' が名簿にいる'); return p; };
+// シート「参加者」の行（見出しを除く）をトークンで探す
+const sheetRow = token => {
+  const rows = ctx.__mock.values('参加者');
+  const r = rows.slice(1).find(x => String(x[1]) === token);
+  assert.ok(r, 'シートに行がある: ' + token);
+  return { name: r[2], kind: r[3], seat: r[4] === '' ? null : Number(r[4]), drink: r[5] === '' ? null : String(r[5]), drawnAt: r[6], drinkAt: r[7] };
+};
+
+/* ---------- 配信サーバー（doGet を呼ぶ） ---------- */
+const server = http.createServer((req, res) => {
+  const u = new URL(req.url, 'http://localhost');
+  if (u.pathname !== '/exec') { res.writeHead(204); res.end(); return; }
+  const parameter = {}, parameters = {};
+  for (const [k, v] of u.searchParams) { if (!(k in parameter)) parameter[k] = v; (parameters[k] = parameters[k] || []).push(v); }
+  let out;
+  try { out = ctx.doGet({ parameter, parameters, queryString: u.search.slice(1), contextPath: '', contentLength: -1 }); } catch (e) { res.writeHead(500); res.end(String(e && e.message)); return; }
+  let html = out.getContent();
+  // 実際の GAS は外側のページに viewport とタイトルを付けて iframe で表示する。ここでは同じ文書に入れる
+  const meta = out.getMetaTags().map(m => '<meta name="' + m.getName() + '" content="' + m.getContent() + '">').join('');
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, h => h + meta) : meta + html;
+  res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'x-gas-title': encodeURIComponent(out.getTitle()) });
+  res.end(html);
+});
+
+// ページ側の偽 google.script。run は非同期（実際の GAS 同様、呼び出し後に別タスクで結果が返る）
+const FAKE_GOOGLE = `(() => {
+  const loc = () => { const parameter = {}, parameters = {}; for (const [k, v] of new URLSearchParams(location.search)) { if (!(k in parameter)) parameter[k] = v; (parameters[k] = parameters[k] || []).push(v); } return { parameter, parameters, hash: '' }; };
+  const mk = (ok, ng, user) => new Proxy({}, { get(_, p) {
+    if (p === 'withSuccessHandler') return h => mk(h, ng, user);
+    if (p === 'withFailureHandler') return h => mk(ok, h, user);
+    if (p === 'withUserObject') return o => mk(ok, ng, o);
+    if (typeof p !== 'string' || p === 'then' || p === 'toJSON') return undefined;
+    return (...args) => {
+      const json = JSON.stringify(args); // 実際の GAS と同じく、オブジェクトの undefined のプロパティは送られない
+      setTimeout(() => {
+        window.__gasCall(p, json).then(r => setTimeout(() => {
+          if (r.ok) { if (ok) ok(r.result === undefined ? undefined : JSON.parse(r.result), user); }
+          // 実際の GAS（V8）ではメッセージの先頭に「Error: 」が付いて届くことがあるので、画面側で取り除けているかを確かめるため付けておく
+          else if (ng) { const e = new Error('Error: ' + r.message); e.name = 'ScriptError'; ng(e, user); }
+          else console.warn('unhandled GAS failure: ' + r.message);
+        }, 30 + Math.floor(Math.random() * 60)));
+      }, 0);
+    };
+  } });
+  window.google = { script: { run: mk(null, null, undefined), url: { getLocation: cb => setTimeout(() => cb(loc()), 0) }, host: { close() {}, setHeight() {}, setWidth() {}, editor: {} }, history: { push() {}, replace() {}, setChangeHandler() {} } } };
+})();`;
+
+/* ---------- ブラウザまわり ---------- */
+const problems = [];
+let base;
+async function newPage(browser, label, viewport) {
+  const context = await browser.newContext({ viewport, deviceScaleFactor: 1, locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
+  await context.exposeFunction('__gasCall', (name, argsJson) => {
+    calls.push({ label, name });
+    try {
+      const result = callServer(ctx, name, JSON.parse(argsJson));
+      return { ok: true, result: result === undefined ? undefined : JSON.stringify(result) };
+    } catch (e) { return { ok: false, message: e.message }; }
+  });
+  await context.addInitScript(FAKE_GOOGLE);
+  const page = await context.newPage();
+  page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning' && /unhandled GAS/.test(m.text())) problems.push(label + ' console.' + m.type() + ': ' + m.text()); });
+  page.on('pageerror', e => problems.push(label + ' pageerror: ' + e.message));
+  page.on('requestfailed', r => problems.push(label + ' requestfailed: ' + r.url()));
+  page.on('dialog', d => { problems.push(label + ' unexpected native dialog: ' + d.message()); d.dismiss().catch(() => {}); });
+  page.setDefaultTimeout(8000);
+  return page;
+}
+const open = (page, params) => page.goto(base + '/exec?' + new URLSearchParams(params).toString());
+const shot = (page, name, fullPage = true) => page.screenshot({ path: path.join(SHOTS, name + '.png'), fullPage });
+const noHScroll = async (page, label) => {
+  const [sw, iw] = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+  assert.ok(sw <= iw, label + ': 横スクロールが出ない (scrollWidth ' + sw + ' > ' + iw + ')');
+};
+const text = (page, sel) => page.locator(sel).innerText();
+// 幹事画面：通信が終わってステータスに文言が出るまで待つ
+async function waitStatus(page, re) { await page.waitForFunction(r => new RegExp(r).test(document.getElementById('status').textContent), re.source); }
+
+const results = [];
+async function step(name, fn) {
+  const t0 = Date.now();
+  try { await fn(); results.push(['ok', name]); console.log('ok   ' + name + ' (' + (Date.now() - t0) + 'ms)'); }
+  catch (e) { results.push(['NG', name]); console.log('NG   ' + name + '\n     ' + String(e && e.stack || e).split('\n').slice(0, 4).join('\n     ')); throw e; }
+}
+
+(async () => {
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  base = 'http://127.0.0.1:' + server.address().port;
+  const browser = await playwright.chromium.launch();
+  let failed = false;
+  try {
+    const LOTTERY = ['山田 太郎', '鈴木 花子', '佐藤 次郎', '田中 美咲', '高橋 健'];
+    const FIXED = '部長 伊藤';
+    let admin;
+
+    await step('1) 幹事画面：読み込み・名簿登録・会の名前と席数・QR表示', async () => {
+      admin = await newPage(browser, 'admin-pc', { width: 1280, height: 900 });
+      await open(admin, { admin: KEY });
+      await admin.locator('#view-drinks').waitFor({ state: 'visible' });
+      assert.equal(await admin.title(), '席くじ 幹事画面');
+      assert.match(await text(admin, '#drinkrows'), /まだ名簿がありません/);
+      await admin.click('#tab-setup');
+      await admin.locator('#view-setup').waitFor({ state: 'visible' });
+      // くじを引く方 5 名（改行・読点・カンマ混在）
+      await admin.fill('#bulk', LOTTERY.slice(0, 3).join('\n') + '、' + LOTTERY[3] + ',' + LOTTERY[4]);
+      await admin.check('input[name=bulkkind][value=lottery]');
+      await admin.click('#bulkadd');
+      await admin.waitForFunction(() => /5人を名簿に追加しました/.test(document.getElementById('bulkstate').textContent));
+      // 固定席 1 名
+      await admin.fill('#bulk', FIXED);
+      await admin.check('input[name=bulkkind][value=fixed]');
+      await admin.click('#bulkadd');
+      await admin.waitForFunction(() => /1人を名簿に追加しました/.test(document.getElementById('bulkstate').textContent));
+      // 重複はスキップされる
+      await admin.fill('#bulk', LOTTERY[0]);
+      await admin.check('input[name=bulkkind][value=lottery]');
+      await admin.click('#bulkadd');
+      await admin.locator('#errortext').filter({ hasText: '追加できる方がいませんでした' }).waitFor();
+      await admin.click('#errorclose');
+      // 会の名前・席数
+      await admin.fill('#event', '送別会');
+      await admin.click('#eventsave');
+      await waitStatus(admin, /会の名前を保存しました/);
+      await admin.fill('#seats', '8');
+      await admin.click('#seatssave');
+      await waitStatus(admin, /抽選席を8席にしました/);
+      // 範囲外の席数はサーバーで拒否され、赤いバーに出る
+      await admin.fill('#seats', '100');
+      await admin.click('#seatssave');
+      await admin.locator('#error').waitFor({ state: 'visible' });
+      assert.match(await text(admin, '#errortext'), /^抽選席数は/, 'エラー文の先頭の「Error: 」は取り除いて表示');
+      await admin.click('#errorclose');
+      await admin.fill('#seats', '8');
+
+      const st = state();
+      assert.equal(st.people.length, 6);
+      assert.deepEqual(st.people.map(p => p.name), [...LOTTERY, FIXED]);
+      assert.deepEqual(st.people.map(p => p.kind), ['lottery', 'lottery', 'lottery', 'lottery', 'lottery', 'fixed']);
+      assert.equal(st.settings.event, '送別会');
+      assert.equal(st.settings.seats, 8);
+      const settingsSheet = Object.fromEntries(ctx.__mock.values('設定').map(r => [r[0], r[1]]));
+      assert.equal(String(settingsSheet.event), '送別会');
+      assert.equal(Number(settingsSheet.seats), 8);
+      assert.equal(ctx.__mock.values('参加者').length, 7, '見出し＋6行');
+      assert.match(await text(admin, '#roster'), /部長 伊藤[\s\S]*固定席/);
+      assert.match(await text(admin, '#rostercount'), /名簿 6人（抽選席 5人・固定席 1人）/);
+      await admin.locator('#eventhead').filter({ hasText: '送別会' }).waitFor();
+      await noHScroll(admin, 'admin-pc setup');
+      await shot(admin, 'admin-setup');
+
+      // QR タブ → QR表示ダイアログ
+      await admin.click('#tab-qr');
+      await admin.locator('#view-qr').waitFor({ state: 'visible' });
+      assert.equal(await admin.locator('#qrurlwarn').isHidden(), true, 'appUrl があるので警告は出ない');
+      assert.equal(await text(admin, '#qrevent'), '送別会');
+      const target = byName(LOTTERY[0]);
+      await admin.locator('#qrrows tr', { hasText: LOTTERY[0] }).getByRole('button', { name: /QRコードを表示/ }).click();
+      await admin.locator('#qrdialog[open] #qrbox svg').waitFor({ state: 'visible' });
+      const link = await admin.inputValue('#qrlink');
+      assert.ok(link.includes('?t='), 'リンクに ?t= が入る: ' + link);
+      assert.equal(link, 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + target.token);
+      assert.equal(await admin.getAttribute('#qropen', 'href'), link);
+      const box = await admin.locator('#qrbox svg').boundingBox();
+      assert.ok(box.width >= 180, 'QR が大きく表示される (' + box.width + 'px)');
+      assert.match(await text(admin, '#qrtitle'), /山田 太郎/);
+      await shot(admin, 'admin-qr-dialog', false);
+      await admin.click('#qrclose');
+      await admin.locator('#qrdialog').waitFor({ state: 'hidden' });
+    });
+
+    let lot, part;
+    await step('2) 参加者画面：くじを引く→番号表示→ドリンク登録（メニュー・その他）→再読込で復元', async () => {
+      lot = byName(LOTTERY[0]);
+      part = await newPage(browser, 'participant', { width: 390, height: 844 });
+      await open(part, { t: lot.token });
+      await part.locator('#draw').waitFor({ state: 'visible' });
+      assert.equal(await part.title(), '席くじ');
+      assert.equal(await text(part, '#name'), LOTTERY[0] + ' さん');
+      assert.match(await text(part, '#intro'), /送別会/);
+      assert.equal(await part.locator('#drinkbox').isHidden(), true, '席が決まるまでドリンク欄は出ない');
+      await noHScroll(part, 'participant before');
+      await shot(part, 'participant-before');
+
+      const t0 = Date.now();
+      await part.click('#draw');
+      await part.locator('#number.rolling').waitFor({ state: 'visible', timeout: 1000 });
+      assert.equal(await part.locator('#resulthint').isHidden(), true, '演出中は結果の案内を出さない');
+      await part.locator('#resulthint').waitFor({ state: 'visible', timeout: 6000 });
+      const elapsed = Date.now() - t0;
+      assert.ok(elapsed >= 1400, '演出は最低1.5秒 (' + elapsed + 'ms)');
+      const shown = Number((await text(part, '#number')).replace(/\D/g, ''));
+      const row = sheetRow(lot.token);
+      assert.ok(Number.isInteger(row.seat) && row.seat >= 1 && row.seat <= 8, 'シートに席が入る: ' + row.seat);
+      assert.equal(shown, row.seat, '画面の番号とシートの席番号が一致');
+      assert.match(String(row.drawnAt), /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
+      assert.equal(await text(part, '#name2'), LOTTERY[0] + ' さんのお席');
+      assert.equal(await part.locator('#number.pop').count(), 1, '確定時に pop');
+      // 読み上げ：回っている数字は読まず、結果だけを知らせる
+      assert.equal(await part.locator('#number[aria-live]').count(), 0);
+      assert.equal(await part.locator('#number[aria-hidden]').count(), 0, '確定後は番号を読める');
+      assert.equal(await part.locator('#announce').textContent(), LOTTERY[0] + ' さんのお席は ' + shown + '番 です。');
+      assert.equal(calls.filter(c => c.label === 'participant' && c.name === 'participantDraw').length, 1, 'サーバーの抽選は1回だけ');
+      await part.locator('#drinkbox').waitFor({ state: 'visible' });
+      await part.waitForTimeout(500); // pop が終わってから撮る
+      await shot(part, 'participant-result');
+
+      // メニューから選ぶ
+      await part.locator('#drinklist button', { hasText: /^ハイボール$/ }).click();
+      await part.locator('#drinkmsg.ok').filter({ hasText: '「ハイボール」で登録しました' }).waitFor();
+      assert.equal(sheetRow(lot.token).drink, 'ハイボール');
+      assert.match(String(sheetRow(lot.token).drinkAt), /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/);
+      assert.equal(await part.locator('#drinklist button.sel').innerText(), 'ハイボール');
+      await noHScroll(part, 'participant drink');
+      await shot(part, 'participant-drink');
+
+      // その他（全角英数も NFKC で正規化して保存。Enter で決定）
+      await part.click('#otherbtn');
+      await part.locator('#otherinput').waitFor({ state: 'visible' });
+      await part.fill('#otherinput', '  ジンジャーエール　ＺＥＲＯ ');
+      await part.press('#otherinput', 'Enter');
+      await part.locator('#drinkmsg.ok').filter({ hasText: '「ジンジャーエール ZERO」で登録しました' }).waitFor();
+      assert.equal(sheetRow(lot.token).drink, 'ジンジャーエール ZERO');
+      assert.equal(await part.locator('#otherform').isHidden(), true);
+      assert.match(await part.locator('#otherbtn').innerText(), /その他：ジンジャーエール ZERO/);
+
+      // 再読込 → 席とドリンクがサーバーから復元（くじボタンは出ない）
+      const seat = sheetRow(lot.token).seat;
+      await part.reload();
+      await part.locator('#result').waitFor({ state: 'visible' });
+      assert.equal(await part.locator('#intro').isHidden(), true);
+      assert.equal(Number((await text(part, '#number')).replace(/\D/g, '')), seat);
+      await part.locator('#drinkbox').waitFor({ state: 'visible' });
+      assert.match(await part.locator('#otherbtn.sel').innerText(), /ジンジャーエール ZERO/);
+      assert.match(await text(part, '#drinkmsg'), /「ジンジャーエール ZERO」で登録済みです/);
+
+      // もう一度演出を見る（サーバーは呼ばない）
+      const before = calls.length;
+      await part.click('#again');
+      await part.locator('#number.rolling').waitFor({ state: 'visible', timeout: 1000 });
+      await part.locator('#again').waitFor({ state: 'visible', timeout: 4000 });
+      assert.equal(Number((await text(part, '#number')).replace(/\D/g, '')), seat);
+      assert.equal(calls.length, before, '演出の見直しでサーバーを呼ばない');
+
+      // 未定も登録できる
+      await part.locator('#drinklist button', { hasText: 'あとで決める（未定）' }).click();
+      await part.locator('#drinkmsg.ok').filter({ hasText: '「未定」で登録しました' }).waitFor();
+      assert.equal(sheetRow(lot.token).drink, '未定');
+      await part.locator('#drinklist button', { hasText: /^ハイボール$/ }).click();
+      await part.locator('#drinkmsg.ok').filter({ hasText: '「ハイボール」で登録しました' }).waitFor();
+
+      // 末尾「_」の関数はクライアントから呼べない（実際の GAS と同じ）
+      const priv = await part.evaluate(() => window.__gasCall('load_', '[]'));
+      assert.equal(priv.ok, false);
+
+      // 間違ったトークン → エラー表示
+      const bad = await newPage(browser, 'participant-bad', { width: 390, height: 844 });
+      await open(bad, { t: 'WRONGTOKEN1234567890' });
+      await bad.locator('#bad').waitFor({ state: 'visible' });
+      assert.match(await text(bad, '#badmsg'), /^QRコードが無効です/);
+      assert.equal(await bad.locator('#draw').isVisible(), false);
+      assert.equal(await bad.locator('#drinkbox').isHidden(), true);
+      await shot(bad, 'participant-badtoken');
+      await bad.context().close();
+    });
+
+    await step('2b) 2人目：くじ→ビール（席が重ならない）', async () => {
+      const p2 = byName(LOTTERY[1]);
+      const pg = await newPage(browser, 'participant2', { width: 390, height: 844 });
+      await open(pg, { t: p2.token });
+      await pg.click('#draw');
+      await pg.locator('#resulthint').waitFor({ state: 'visible', timeout: 6000 });
+      const seat = Number((await text(pg, '#number')).replace(/\D/g, ''));
+      assert.equal(seat, sheetRow(p2.token).seat);
+      assert.notEqual(seat, sheetRow(lot.token).seat, '席が重ならない');
+      await pg.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await pg.locator('#drinkmsg.ok').waitFor();
+      assert.equal(sheetRow(p2.token).drink, 'ビール');
+      await pg.context().close();
+    });
+
+    await step('3) 固定席の方：くじボタンなし・ドリンクは登録できる', async () => {
+      const f = byName(FIXED);
+      const pg = await newPage(browser, 'participant-fixed', { width: 390, height: 844 });
+      await open(pg, { t: f.token });
+      await pg.locator('#fixed').waitFor({ state: 'visible' });
+      assert.match(await text(pg, '#fixedname'), /部長 伊藤 さんは\s*固定席\s*です/);
+      assert.equal(await pg.locator('#draw').isVisible(), false, 'くじボタンは出ない');
+      await pg.locator('#drinkbox').waitFor({ state: 'visible' });
+      await pg.locator('#drinklist button', { hasText: /^ウーロン茶$/ }).click();
+      await pg.locator('#drinkmsg.ok').filter({ hasText: '「ウーロン茶」で登録しました' }).waitFor();
+      const row = sheetRow(f.token);
+      assert.equal(row.drink, 'ウーロン茶');
+      assert.equal(row.seat, null);
+      await noHScroll(pg, 'participant fixed');
+      await shot(pg, 'participant-fixed');
+      await pg.context().close();
+    });
+
+    await step('3b) くじの画面を開いている間に固定席に変わった → くじを押すと固定席の画面に切り替わる', async () => {
+      const p4 = byName(LOTTERY[3]);
+      const pg = await newPage(browser, 'participant-switch', { width: 390, height: 844 });
+      await open(pg, { t: p4.token });
+      await pg.locator('#draw').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminUpdatePerson', [KEY, p4.id, { kind: 'fixed' }]);
+      await pg.click('#draw');
+      await pg.locator('#fixed').waitFor({ state: 'visible', timeout: 6000 });
+      await pg.locator('#drinkbox').waitFor({ state: 'visible' });
+      assert.equal(await pg.locator('#draw').isVisible(), false);
+      // QR を作り直された → 無効の画面に切り替わる
+      callServer(ctx, 'adminUpdatePerson', [KEY, p4.id, { kind: 'lottery' }]);
+      await open(pg, { t: p4.token });
+      await pg.locator('#draw').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminReissueToken', [KEY, p4.id]);
+      await pg.click('#draw');
+      await pg.locator('#bad').waitFor({ state: 'visible', timeout: 6000 });
+      assert.match(await text(pg, '#badmsg'), /^QRコードが無効です/);
+      await pg.context().close();
+      assert.equal(byName(LOTTERY[3]).kind, 'lottery'); assert.equal(byName(LOTTERY[3]).seat, null);
+    });
+
+    await step('4) 幹事画面：ドリンク一覧・集計に反映／代わりに引く', async () => {
+      await admin.click('#tab-drinks');
+      await admin.click('#refresh');
+      await admin.locator('#drinkrows').filter({ hasText: 'ウーロン茶' }).waitFor();
+      const rowsText = await text(admin, '#drinkrows');
+      for (const s of [LOTTERY[0], 'ハイボール', LOTTERY[1], 'ビール', FIXED, 'ウーロン茶']) assert.ok(rowsText.includes(s), '一覧に「' + s + '」');
+      const sm = state().summary;
+      assert.equal(sm.total, 6); assert.equal(sm.none, 3); assert.equal(sm.undecided, 0);
+      assert.equal(sm.seated, 2); assert.equal(sm.seatsLeft, 6);
+      const count = async name => Number((await admin.locator('#drinkcounts .drinkcount', { has: admin.locator('span', { hasText: new RegExp('^' + name + '$') }) }).locator('strong').innerText()).replace(/\D/g, ''));
+      assert.equal(await count('ビール'), 1);
+      assert.equal(await count('ハイボール'), 1);
+      assert.equal(await count('ウーロン茶'), 1);
+      assert.equal(await count('コーラ'), 0);
+      assert.equal(await count('未登録'), 3);
+      assert.equal(await count('合計'), 6);
+      assert.match(await text(admin, '#drinktotal'), /注文が決まったドリンク 3杯/);
+      // 席の列：席番号順で、表示が一致
+      const mySeat = sheetRow(lot.token).seat;
+      assert.match(await admin.locator('#drinkrows tr', { hasText: LOTTERY[0] }).innerText(), new RegExp('^\\s*' + mySeat + '\\b'));
+      // 未登録の方だけ
+      await admin.check('#onlynone');
+      const onlyText = await text(admin, '#drinkrows');
+      assert.ok(!onlyText.includes(LOTTERY[0]) && onlyText.includes(LOTTERY[2]), '未登録の方だけに絞れる');
+      await admin.uncheck('#onlynone');
+      await admin.locator('#updatedtext').filter({ hasText: /最終更新/ }).waitFor();
+      // 自動更新で表が描き直されても、キーボードの位置（修正ボタン）は失われない
+      const p2id = byName(LOTTERY[1]).id;
+      await admin.locator('#drinkrows tr', { hasText: LOTTERY[1] }).getByRole('button', { name: /修正/ }).focus();
+      await admin.evaluate(() => refresh(false));
+      await admin.waitForTimeout(300);
+      assert.equal(await admin.evaluate(() => document.activeElement && document.activeElement.dataset.fk), 'd:edit:' + p2id);
+      await shot(admin, 'admin-drinks');
+
+      // 代わりに引く（確認ダイアログ → OK）
+      await admin.click('#tab-qr');
+      await admin.locator('#qrrows tr', { hasText: LOTTERY[2] }).getByRole('button', { name: /代わりにくじを引く/ }).click();
+      await admin.locator('#askdialog[open]').waitFor();
+      await admin.click('#askyes');
+      await waitStatus(admin, /佐藤 次郎さんの席は \d+番 です/);
+      const s3 = sheetRow(byName(LOTTERY[2]).token).seat;
+      assert.ok(s3 >= 1 && s3 <= 8);
+      assert.match(await admin.locator('#qrrows tr', { hasText: LOTTERY[2] }).innerText(), new RegExp(s3 + '番'));
+      assert.equal(await admin.evaluate(() => document.activeElement && document.activeElement.dataset.fk), 'q:show:' + byName(LOTTERY[2]).id, '代わりに引いたあと、同じ方の「QR表示」にフォーカス');
+      assert.equal(new Set(state().people.filter(p => p.seat != null).map(p => p.seat)).size, 3, '席の重複なし');
+    });
+
+    await step('5) ドリンクの受付をオフ → 参加者は締め切り表示', async () => {
+      // 参加者画面を開いたままにしておき、締め切り後に選ぼうとすると締め切り表示に切り替わる
+      await part.reload();
+      await part.locator('#drinklist button', { hasText: /^ビール$/ }).waitFor();
+      await admin.click('#tab-drinks');
+      await admin.locator('#view-drinks .drinkopen').click();
+      await waitStatus(admin, /ドリンクの受付を締め切りました/);
+      assert.equal(state().settings.drinkOpen, false);
+      assert.equal(await admin.locator('#view-drinks .drinkopen').getAttribute('aria-checked'), 'false');
+      assert.equal(await admin.locator('#view-setup .drinkopen').getAttribute('aria-checked'), 'false');
+
+      await part.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await part.locator('#drinkclosed').waitFor({ state: 'visible' });
+      assert.equal(sheetRow(lot.token).drink, 'ハイボール', '締め切り後は変わらない');
+      assert.equal(await text(part, '#drinkcurrent'), 'ハイボール');
+      await part.reload();
+      await part.locator('#result').waitFor({ state: 'visible' });
+      await part.locator('#drinkclosed').waitFor({ state: 'visible' });
+      assert.equal(await part.locator('#drinkopen').isHidden(), true, 'ドリンクのボタンは出ない');
+      assert.match(await text(part, '#drinkbox'), /ドリンクの受付は締め切りました[\s\S]*ハイボール/);
+      await shot(part, 'participant-closed');
+
+      // 受付を再開すると選べる
+      await admin.locator('#view-drinks .drinkopen').click();
+      await waitStatus(admin, /ドリンクの受付を再開しました/);
+      await part.reload();
+      await part.locator('#drinklist button', { hasText: /^ビール$/ }).waitFor();
+    });
+
+    await step('6) 合言葉が違う → 案内ページ（幹事画面は出ない）', async () => {
+      const pg = await newPage(browser, 'admin-wrong', { width: 390, height: 844 });
+      for (const params of [{ admin: KEY + 'x' }, { admin: '' }, {}]) {
+        await open(pg, params);
+        await pg.getByText('受付でお渡ししたQRコードを読み取ってください').waitFor();
+        assert.equal(await pg.locator('#tab-drinks').count(), 0);
+        assert.ok(!/幹事/.test(await pg.content()), '幹事画面の存在を示唆しない');
+      }
+      // サーバー API も合言葉が違えば拒否
+      const r = await pg.evaluate(() => window.__gasCall('adminGetState', JSON.stringify(['wrong-key'])));
+      assert.deepEqual(r, { ok: false, message: '幹事用の合言葉が違います。' });
+      await shot(pg, 'landing');
+      await pg.context().close();
+    });
+
+    await step('7) 幹事画面（スマホ幅 390×844）', async () => {
+      const pg = await newPage(browser, 'admin-mobile', { width: 390, height: 844 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows').filter({ hasText: 'ハイボール' }).waitFor();
+      await noHScroll(pg, 'admin-mobile drinks');
+      await shot(pg, 'admin-mobile');
+      for (const tab of ['qr', 'setup']) {
+        await pg.click('#tab-' + tab);
+        await pg.locator('#view-' + tab).waitFor({ state: 'visible' });
+        await noHScroll(pg, 'admin-mobile ' + tab);
+      }
+      await shot(pg, 'admin-mobile-setup');
+      await pg.click('#tab-qr');
+      await pg.locator('#qrrows tr', { hasText: FIXED }).getByRole('button', { name: /QRコードを表示/ }).click();
+      await pg.locator('#qrdialog[open] #qrbox svg').waitFor({ state: 'visible' });
+      assert.ok((await pg.inputValue('#qrlink')).endsWith('?t=' + byName(FIXED).token));
+      await noHScroll(pg, 'admin-mobile qr dialog');
+      await shot(pg, 'admin-mobile-qr', false);
+      await pg.context().close();
+    });
+
+    await step('ページのエラー・コンソールエラーなし', async () => {
+      assert.deepEqual(problems, []);
+    });
+  } catch (e) {
+    failed = true;
+    if (problems.length) console.log('console/page problems:\n  ' + problems.join('\n  '));
+  } finally {
+    await browser.close();
+    server.close();
+  }
+  console.log('gas-e2e: ' + results.filter(r => r[0] === 'ok').length + ' passed, ' + (failed ? 1 : 0) + ' failed. screenshots: ' + SHOTS);
+  process.exit(failed ? 1 : 0);
+})().catch(e => { console.error(e); process.exit(1); });
