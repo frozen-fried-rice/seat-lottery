@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex"><meta name="description" content="受付で受け取ったQRコードから、自分の席を引く画面です"><title>席くじ</title><link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231a3762'/%3E%3Ctext x='16' y='23' text-anchor='middle' font-size='23' fill='white'%3E席%3C/text%3E%3C/svg%3E"><style>
+:root{font-family:system-ui,-apple-system,'Noto Sans JP',sans-serif;color:#182d4a;background:#f3f6fb;font-size:16px}
+*{box-sizing:border-box}
+body{margin:0;min-height:100svh;display:flex;align-items:center;justify-content:center;padding:20px 16px}
+main{width:100%;max-width:420px;background:#fff;border:1px solid #dfe6ef;border-radius:24px;padding:30px 22px;text-align:center;box-shadow:0 12px 40px #213a6314}
+.event{font-size:14px;font-weight:700;letter-spacing:.12em;color:#597089;margin:0 0 6px;overflow-wrap:anywhere}
+h1{font-size:28px;margin:0 0 6px;overflow-wrap:anywhere;line-height:1.35}
+.lead{color:#617087;font-size:15px;line-height:1.9;margin:14px 0 22px}
+button{cursor:pointer;border:0;border-radius:14px;font:inherit;font-weight:700;min-height:56px;padding:14px 22px;background:#e9eff8;color:#183659}
+button:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+.primary{background:#2255aa;color:#fff;font-size:20px;min-height:66px;width:100%;box-shadow:0 6px 14px #2255aa26}
+.primary:active{transform:translateY(1px)}
+.number{font-size:110px;line-height:1.1;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.05em;color:#193961;margin:10px 0 4px;min-height:124px;display:flex;align-items:center;justify-content:center;gap:4px}
+.number small{font-size:26px;letter-spacing:0;font-weight:700}
+.rolling{color:#8fa3bf}
+.pop{animation:pop .45s ease-out}
+@keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+.who{font-size:19px;font-weight:700;margin:0}
+.hint{color:#617087;font-size:14px;line-height:1.9}
+.again{margin-top:18px;font-size:14px;min-height:44px;padding:10px 16px;background:transparent;color:#5b708c}
+[hidden]{display:none!important}
+</style></head><body>
+<main>
+ <div id="intro" hidden>
+  <p class="event" id="event"></p>
+  <h1 id="name"></h1>
+  <p class="lead">ボタンを押すと、あなたのお席が決まります。</p>
+  <button class="primary" id="draw">くじを引く</button>
+ </div>
+ <div id="result" hidden>
+  <p class="event" id="event2"></p>
+  <p class="who" id="name2"></p>
+  <div class="number" id="number" aria-live="polite"></div>
+  <p class="hint" id="resulthint">テーブルの番号札をご確認ください。<br>この画面のスクリーンショットを撮っておくと安心です。</p>
+  <button class="again" id="again" hidden>もう一度引く演出を見る</button>
+ </div>
+ <div id="bad" hidden>
+  <h1>席の情報が読み取れません</h1>
+  <p class="lead">お手数ですが、受付でお渡ししたQRコードをもう一度読み取ってください。<br>うまくいかないときは受付にお声がけください。</p>
+ </div>
+</main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+function decodePayload(hash){
+ const raw=String(hash||'').replace(/^#/,'');
+ if(!raw)return null;
+ try{
+  const b64=raw.replace(/-/g,'+').replace(/_/g,'/');
+  const bin=atob(b64+'==='.slice((b64.length+3)%4));
+  const bytes=Uint8Array.from(bin,c=>c.charCodeAt(0));
+  const o=JSON.parse(new TextDecoder().decode(bytes));
+  if(!o||typeof o.n!=='string'||!o.n.trim())return null;
+  if(!Number.isInteger(o.s)||o.s<1||o.s>999)return null;
+  return {key:raw,name:o.n.slice(0,60),seat:o.s,event:typeof o.e==='string'?o.e.slice(0,40):''};
+ }catch(e){return null;}
+}
+const data=decodePayload(location.hash);
+if(!data){
+ $('bad').hidden=false;
+}else{
+ const openedKey='sekikuji.opened.'+data.key;
+ let opened=false;
+ try{opened=localStorage.getItem(openedKey)==='1';}catch(e){}
+ $('event').textContent=data.event;$('event2').textContent=data.event;
+ $('event').hidden=!data.event;$('event2').hidden=!data.event;
+ $('name').textContent=data.name+' さん';
+ $('name2').textContent=data.name+' さんのお席';
+ const showNumber=(text,rolling)=>{
+  const n=$('number');
+  n.replaceChildren(document.createTextNode(text));
+  if(!rolling){const small=document.createElement('small');small.textContent='番';n.append(small);}
+  n.className='number'+(rolling?' rolling':' pop');
+ };
+ let rolling=null;
+ const finish=()=>{
+  if(rolling){clearInterval(rolling);rolling=null;}
+  showNumber(String(data.seat),false);
+  $('again').hidden=false;
+  try{localStorage.setItem(openedKey,'1');}catch(e){}
+ };
+ const reveal=()=>{
+  $('intro').hidden=true;$('result').hidden=false;$('again').hidden=true;
+  if(rolling){clearInterval(rolling);rolling=null;}
+  if(document.hidden){finish();return;}
+  const top=Math.max(data.seat,20);
+  rolling=setInterval(()=>showNumber(String(1+Math.floor(Math.random()*top)),true),80);
+  setTimeout(finish,1500);
+ };
+ if(opened){
+  $('result').hidden=false;
+  showNumber(String(data.seat),false);
+  $('again').hidden=false;
+ }else{
+  $('intro').hidden=false;
+ }
+ $('draw').onclick=reveal;
+ $('again').onclick=reveal;
+}
+</script></body></html>
