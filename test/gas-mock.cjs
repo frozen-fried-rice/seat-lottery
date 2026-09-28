@@ -90,7 +90,20 @@ class MockSheet {
     this._cells.forEach(row => row && row.forEach((c, i) => { if (c && c.v !== '' && i > m) m = i; }));
     return m;
   }
-  getMaxRows() { return Math.max(1000, this._cells.length); }
+  getMaxRows() { return Math.max(this._maxRows === undefined ? 1000 : this._maxRows, this._cells.length - 1); }
+  // 行の削除・挿入は実際のシートと同じく、右側の列（メモや数式）も行と一緒に動きます
+  deleteRow(r) { return this.deleteRows(r, 1); }
+  deleteRows(r, n) {
+    const max = this.getMaxRows();
+    if (!Number.isInteger(r) || !Number.isInteger(n) || r < 1 || n < 1 || r + n - 1 > max) throw new Error('Exception: Those rows are out of bounds.');
+    if (max - n <= this._frozen) throw new Error('Exception: Sorry, it is not possible to delete all non-frozen rows.');
+    this._cells.splice(r, n);
+    this._maxRows = max - n;
+    const st = this._ss._backend.stats; st.deleteRows = (st.deleteRows || 0) + 1;
+    return this;
+  }
+  insertRowsAfter(r, n) { const max = this.getMaxRows(); if (this._cells.length > r + 1) this._cells.splice(r + 1, 0, ...new Array(n)); this._maxRows = max + n; return this; }
+  insertColumnBefore(c) { this._cells.forEach(row => { if (row && row.length > c) row.splice(c, 0, undefined); }); return this; }
   getMaxColumns() { return 26; }
   setFrozenRows(n) { this._frozen = n; return this; }
   getFrozenRows() { return this._frozen; }

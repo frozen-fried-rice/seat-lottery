@@ -468,8 +468,8 @@ test('シートの正規化: 席番号の重複（手で編集）は後ろの人
   assert.deepEqual(st.people.map(p => p.seat), [s, null]);
   assert.equal(st.people.length, 2);
   const v = ctx.__mock.values('参加者');
-  assert.equal(v.length, 4, 'お名前の無い行は残る');
-  assert.deepEqual(v[3].slice(0, 5).map(String), ['zzz', 'tok', '', '', '3']);
+  assert.equal(v.length, 5, 'お名前の無い行は、その場所（5行目）に残る');
+  assert.deepEqual(v[4].slice(0, 5).map(String), ['zzz', 'tok', '', '', '3']);
   // 3番は使用中なので誰にも割り当てない
   assert.equal(st.summary.seatsLeft, 27 - 1 - (s === 3 ? 0 : 1), 'お名前の無い行の席（3番）は使用中として扱う（名簿の方と重なったら名簿の方を優先）');
 });
@@ -1237,6 +1237,96 @@ test('回帰: 設定シートに手で書いた「未定」はメニューに出
   assert.equal(v.drinks.length, 20);
   admin('adminSaveSettings', { drinkOpen: false });
   assert.equal(String(ctx.__mock.sheet('設定')._dump().find(r => r[0] === 'drinks')[1]), many, 'メニューを変えない保存では、シートの文字をそのまま残す');
+});
+
+
+/* ================= バグ修正の回帰テスト（第2回 総点検） ================= */
+test('回帰2: お名前を消した行は、ほかの操作のあとも同じ場所に残る（打ち直すと元の方に戻る）', () => {
+  const { ctx, add, admin, people } = fresh();
+  add(['A', 'B', 'C', 'D']);
+  const before = people();
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(3, 3).setValue('');           // B を打ち直し中
+  add(['E']);                                 // 全体の書き込みが起きる
+  sh.getRange(3, 3).setValue('B');
+  const after = people();
+  assert.deepEqual(after.map(p => p.name), ['A', 'B', 'C', 'D', 'E']);
+  for (const n of ['A', 'B', 'C', 'D']) assert.equal(after.find(p => p.name === n).token, before.find(p => p.name === n).token, n + ' のトークンが入れ替わらない');
+});
+
+test('回帰2: 右側の列の数式・文字は書き換えない。削除した方の行は行ごと消え、メモもほかの方にずれない', () => {
+  const { ctx, add, admin, byName } = fresh();
+  add(['A', 'B', 'C']);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(2, 11).setValue('=1+1');
+  sh.getRange(3, 11).setNumberFormat('@').setValue('09012345678');
+  sh.getRange(4, 11).setValue('Cのメモ');
+  admin('adminAddPeople', ['D'], 'lottery');
+  assert.equal(sh.getRange(2, 11).getFormulas()[0][0], '=1+1', '数式が残る');
+  assert.equal(sh.getRange(3, 11).getValue(), '09012345678', '先頭の0が消えない');
+  admin('adminDeletePerson', byName('A').id);
+  const v = ctx.__mock.values('参加者');
+  assert.deepEqual(v.slice(1).map(r => [r[2], r[10]]), [['B', '09012345678'], ['C', 'Cのメモ'], ['D', '']]);
+  // 全員削除（見出し以外の行をすべて消せない制約）でも失敗しない
+  admin('adminReset', 'all');
+  assert.equal(admin('adminGetState').people.length, 0);
+  add(['X']);
+  assert.equal(admin('adminGetState').people[0].name, 'X');
+});
+
+test('回帰2: 以前の版でJ列（受付確認キーの場所）にメモがあった場合は、列を差し込んで残す', () => {
+  const { ctx, add, admin, call, byName } = fresh();
+  add(['A', 'B']);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(1, 10, 3, 1).setValues([['メモ'], ['ベジタリアン'], ['']]);
+  const code = joinCodeOf(admin('adminGetState'));
+  call('joinClaim', code, byName('A').id, 'k'.repeat(20));
+  const v = ctx.__mock.values('参加者');
+  assert.equal(v[0][9], '受付確認キー'); assert.equal(v[0][10], 'メモ');
+  assert.equal(v[1][10], 'ベジタリアン', 'メモは右の列に移って残る');
+  assert.equal(v[1][9], 'k'.repeat(20));
+});
+
+test('回帰2: 席のリセット・名簿ごと消す は、お名前の無い行の席も対象', () => {
+  const { ctx, add, admin, call } = fresh();
+  admin('adminSaveSettings', { seats: 3 });
+  const ps = add(['A', 'B', 'C']).state.people;
+  ps.forEach(p => call('participantDraw', p.token));
+  ctx.__mock.sheet('参加者').getRange(2, 3).setValue('');
+  assert.equal(admin('adminReset', 'seats').summary.seatsLeft, 3);
+  ctx.__mock.sheet('参加者').getRange(3, 5).setValue(2);
+  const st = admin('adminReset', 'all');
+  assert.equal(st.summary.seatsLeft, 3);
+  assert.equal(ctx.__mock.values('参加者').length, 1, '見出しだけ');
+});
+
+test('回帰2: お名前の無い行に同じトークンがあっても、名簿の方のQRは使える', () => {
+  const { ctx, add, call } = fresh();
+  const [a] = add(['A', 'B']).state.people;
+  call('participantGet', a.token);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(4, 1, 1, 10).setValues([sh.getRange(2, 1, 1, 10).getValues()[0]]);
+  sh.getRange(4, 3).setValue('');
+  const v = call('participantGet', a.token);
+  assert.equal(v.name, 'A');
+});
+
+test('回帰2: 混み合っていても共通QRの名前一覧は出る（シートに直接書き足した方は、保存できるまで出さない）', () => {
+  const { ctx, add, admin, call } = fresh();
+  add(['A']);
+  const code = joinCodeOf(admin('adminGetState'));
+  ctx.__mock.sheet('参加者').getRange(3, 3).setValue('手入力');
+  ctx.__mock.setLockBusy(true);
+  assert.deepEqual(call('joinList', code).people.map(p => p.name), ['A']);
+  ctx.__mock.setLockBusy(false);
+  assert.deepEqual(call('joinList', code).people.map(p => p.name), ['A', '手入力']);
+});
+
+test('回帰2: お名前の無い行の席より少ない席数にはできない', () => {
+  const { ctx, add, admin, call } = fresh();
+  const [a] = add(['A']).state.people;
+  ctx.__mock.sheet('参加者').getRange(3, 1, 1, 5).setValues([['zz', 'tokzzzzzzzz', '', '抽選', 9]]);
+  throwsMsg(() => admin('adminSaveSettings', { seats: 5 }), /9番/);
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
