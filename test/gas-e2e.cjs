@@ -780,6 +780,37 @@ async function step(name, fn) {
       await ad.context().close();
     });
 
+    await step('12) 第3回の回帰：幹事画面の無応答で固まらない・長い英字でスマホ幅がはみ出さない', async () => {
+      const pg = await newPage(browser, 'r3a', { width: 360, height: 740 });
+      await pg.addInitScript(() => { window.__SEKI_TIMEOUT_MS = 2000; });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      faults.push({ label: 'r3a', name: 'adminSaveSettings', mode: 'hang' });
+      await pg.locator('#view-drinks .drinkopen').click();
+      await pg.locator('#error').waitFor({ state: 'visible', timeout: 6000 });
+      assert.match(await text(pg, '#errortext'), /通信に失敗しました/);
+      await pg.waitForFunction(() => !document.body.classList.contains('busy'));
+      assert.equal(await pg.locator('#refresh').isEnabled(), true, '操作できる状態に戻る');
+      await pg.click('#errorclose');
+      // 長い英字（空白なし）の会の名前・お名前・ドリンク
+      const W = n => 'W'.repeat(n);
+      callServer(ctx, 'adminSaveSettings', [KEY, { event: W(40) }]);
+      callServer(ctx, 'adminAddPeople', [KEY, [W(60)], 'lottery']);
+      const lp = state().people.find(p => p.name === W(60));
+      callServer(ctx, 'participantSetDrink', [lp.token, W(30)]);
+      await pg.click('#refresh'); await waitStatus(pg, /最新の状態/);
+      for (const tab of ['drinks', 'qr', 'setup']) { await pg.click('#tab-' + tab); await noHScroll(pg, 'long ' + tab); }
+      await pg.click('#tab-qr');
+      await pg.locator('#qrrows tr', { hasText: W(60) }).getByRole('button', { name: /QRコードを表示/ }).click();
+      await pg.locator('#qrdialog[open]').waitFor();
+      const [a1, b1] = await pg.locator('#qrdialog').evaluate(d => [d.scrollWidth, d.clientWidth]);
+      assert.ok(a1 <= b1, 'QR画面が横にはみ出さない ' + a1 + '/' + b1);
+      await pg.click('#qrclose');
+      callServer(ctx, 'adminSaveSettings', [KEY, { event: '送別会' }]);
+      callServer(ctx, 'adminDeletePerson', [KEY, lp.id]);
+      await pg.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });

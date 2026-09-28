@@ -380,7 +380,7 @@ function draw(){
  });
 }
 function replay(){
- if(!view||view.seat==null||rolling||drawing)return;
+ if(!view||view.seat==null||rolling||drawing||shown!=='result')return;
  if(reduced()||document.hidden){showSeat(view);return;}
  $('again').hidden=true;
  startRoll(view.seat);

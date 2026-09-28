@@ -115,6 +115,7 @@ dialog p{line-height:1.8}
 footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;color:#65738a;line-height:1.8}
 #releasewrap,#clearseatwrap{white-space:normal;align-items:flex-start;line-height:1.6;padding-top:8px}
 #releasewrap input,#clearseatwrap input{margin-top:3px;flex:none}
+.hint,#status,dialog p,#errortext,.urlbox,.modebox{overflow-wrap:anywhere}
 [hidden]{display:none!important}
 @media(max-width:860px){
  header{padding:14px 14px 8px}h1{font-size:19px}
@@ -488,10 +489,13 @@ function qrSvgCached(text){
 }
 
 /* サーバー呼び出し（google.script.run を Promise に） */
+// 返事が来ないときも画面が固まったままにならないよう、一定時間で通信エラーにします（遅れて届いた返事は捨てます）
+const API_TIMEOUT_MS=window.__SEKI_TIMEOUT_MS||60000;
 function api(name,...args){
  return new Promise((resolve,reject)=>{
   if(typeof google==='undefined'||!google.script||!google.script.run){reject(Error('この画面は Google Apps Script の Webアプリとして開いてください。'));return;}
-  google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(Error(errText(e)))) [name](key,...args);
+  const t=setTimeout(()=>{const e=Error(NET_ERR);e.timedOut=true;reject(e);},API_TIMEOUT_MS);
+  google.script.run.withSuccessHandler(v=>{clearTimeout(t);resolve(v);}).withFailureHandler(e=>{clearTimeout(t);reject(Error(errText(e)));}) [name](key,...args);
  });
 }
 // サーバーのエラー文は「Error: 」などが付いて届くことがあるので取り除きます
@@ -520,7 +524,7 @@ async function act(name,args,onOk){
   hideError();
   if(onOk)onOk(r);
   return r;
- }catch(e){showError(e);return null;}
+ }catch(e){showError(e);if(e&&e.timedOut)setTimeout(()=>refresh(false,true),0);return null;} // 時間切れのときは、実際に反映されたかを読み直して確かめます
  finally{
   busy--;setBusy();render();
   const a=document.activeElement;
@@ -529,12 +533,12 @@ async function act(name,args,onOk){
 }
 /* 自動・手動の読み込み */
 let refreshing=false,manualPending=false;
-async function refresh(manual){
+async function refresh(manual,keepError){
  if(refreshing){if(manual)manualPending=true;return;} // 自動更新の途中で「更新」を押したら、終わってからもう一度読みます
  if(busy&&!manual)return;
  refreshing=true;const n=++seq;
  if(manual){busy++;setBusy();}
- try{const st=await api('adminGetState');if(applyState(st,n)){hideError();if(manual)ok('最新の状態にしました。');}}
+ try{const st=await api('adminGetState');if(applyState(st,n)){if(!keepError)hideError();if(manual)ok('最新の状態にしました。');}}
  catch(e){if(n>=applied)showError(e,manual?'':'自動更新に失敗しました：');} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
  finally{
   refreshing=false;if(manual){busy--;setBusy();}render();
