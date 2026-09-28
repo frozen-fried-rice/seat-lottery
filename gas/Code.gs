@@ -6,7 +6,7 @@
  */
 
 const SHEET_PEOPLE_ = '参加者', SHEET_SETTINGS_ = '設定';
-const HEADERS_ = ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時'];
+const HEADERS_ = ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時', '受付確認キー'];
 const COL_SEAT_ = 5; // 席番号の列（ここだけ数値。ほかの列は書式なしテキスト）
 const DEFAULT_DRINKS_ = ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'];
 const DEFAULT_SEATS_ = 27, MAX_SEATS_ = 99, MAX_PEOPLE_ = 200, MAX_NAME_ = 60, MAX_DRINK_ = 30, MAX_DRINKS_ = 20, MAX_EVENT_ = 40, MAX_URL_ = 300;
@@ -17,6 +17,7 @@ const ERR_NOSEAT_ = '空いている席がありません。受付にお声が�
 const ERR_FIXED_ = '固定席の方はくじを引きません。';
 const ERR_CLOSED_ = 'ドリンクの受付は締め切りました。受付にお声がけください。';
 const ERR_PERSON_ = '該当する方が見つかりません。画面を更新してから、もう一度お試しください。';
+const ERR_BUSY_ = 'ただいま混み合っています。少し待ってから、もう一度お試しください。';
 const ERR_JOIN_ = 'QRコードが無効です。受付にお声がけください。';
 const ERR_JOIN_CLOSED_ = '共通QRコードでの受付は、いまは停止しています。受付にお声がけください。';
 
@@ -49,7 +50,19 @@ function infoPage_() {
 
 function participantGet(token) {
   const db = load_();
-  return participantView_(db, findByToken_(db, token));
+  const p = findByToken_(db, token);
+  if (p.claimedAt) return participantView_(db, p);
+  // 個別QRを初めて開いた方は「受付済み」にします（共通QRの名前一覧で、ほかの人がこの方を選べないように）
+  try {
+    return withLock_(function () {
+      const d = load_(true), q = findByToken_(d, token);
+      if (!q.claimedAt) { q.claimedAt = now_(); saveRow_(d, q); }
+      return participantView_(d, q);
+    });
+  } catch (err) {
+    if (err && err.message === ERR_BUSY_) return participantView_(db, p); // 混み合っていても表示はできるように（受付の記録は次の操作で付きます）
+    throw err;
+  }
 }
 
 /*
@@ -60,7 +73,7 @@ function participantDraw(token) {
   checkTokenShape_(token);
   const pre = load_(), pp = findByToken_(pre, token);
   if (pp.kind === 'fixed') throw new Error(ERR_FIXED_);
-  if (pp.seat !== null) return participantView_(pre, pp); // すでに席がある（2回押し・再読込）ならロック不要
+  if (pp.seat !== null && pp.claimedAt) return participantView_(pre, pp); // すでに席がある（2回押し・再読込）ならロック不要
   return withLock_(function () {
     const db = load_(true);
     const p = findByToken_(db, token);
@@ -97,25 +110,36 @@ function participantSetDrink(token, drink) {
  */
 
 function joinList(code) {
-  const db = load_();
+  let db = load_();
   checkJoin_(db, code);
+  db = persistIfDirty_(db); // スプレッドシートに直接書き足した行にも、毎回同じIDが付くように保存しておきます
   return {
     event: db.settings.event,
     people: db.people.map(function (p) { return { id: p.id, name: p.name, claimed: !!p.claimedAt }; })
   };
 }
 
-function joinClaim(code, id) {
+/*
+ * claimKey はスマホ側で作るランダムな文字列です。受付の返事が通信の途中で失われても、
+ * 同じスマホが同じ claimKey でやり直せば、同じ方として受付を続けられます（ほかのスマホは claimKey を知らないので選べません）。
+ */
+function joinClaim(code, id, claimKey) {
+  const key = typeof claimKey === 'string' && /^[A-Za-z0-9]{16,64}$/.test(claimKey) ? claimKey : '';
   const pre = load_();
   checkJoin_(pre, code);
-  if (findById_(pre, id).claimedAt) throw new Error(claimedMsg_(findById_(pre, id)));
+  const pp = findById_(pre, id);
+  if (pp.claimedAt && !(key && pp.claimKey === key)) throw new Error(claimedMsg_(pp));
   return withLock_(function () {
     const db = load_(true);
     checkJoin_(db, code);
     const p = findById_(db, id);
-    if (p.claimedAt) throw new Error(claimedMsg_(p));
-    p.claimedAt = now_();
-    saveRow_(db, p);
+    if (p.claimedAt) {
+      if (!(key && p.claimKey === key)) throw new Error(claimedMsg_(p));
+    } else {
+      p.claimedAt = now_();
+      p.claimKey = key || null;
+      saveRow_(db, p);
+    }
     return { token: p.token, view: participantView_(db, p) };
   });
 }
@@ -126,7 +150,7 @@ function adminGetState(key) {
   checkKey_(key);
   let db = load_();
   // 読み込み時に直した箇所がある・共通QRコードがまだ無い（以前の版から更新した）ときは、ここで書き込んでおきます
-  if (db.dirty || !db.settings.joinCode) db = withLock_(function () { const d = load_(true); save_(d); if (!d.settings.joinCode) saveSettings_(d); return d; });
+  if (db.dirty || !db.settings.joinCode) db = withLock_(function () { const d = load_(true); save_(d); if (!d.settings.joinCode) { saveSettings_(d); SpreadsheetApp.flush(); } return d; });
   return adminState_(db);
 }
 
@@ -140,7 +164,7 @@ function adminAddPeople(key, names, kind) {
     const seen = Object.create(null);
     db.people.forEach(function (p) { seen[clean_(p.name)] = true; });
     names.forEach(function (raw) {
-      if (raw === null || raw === undefined) return;
+      if (typeof raw !== 'string') return;
       const n = tidy_(raw);
       if (!n) return;
       if (n.length > MAX_NAME_) { skipped.push(n.slice(0, 20) + '…（' + MAX_NAME_ + '文字を超えています）'); return; }
@@ -173,7 +197,7 @@ function adminUpdatePerson(key, id, patch) {
     }
     if (patch.clearSeat === true) { p.seat = null; p.drawnAt = null; }
     // 受付をやり直すときは、名前を選んだスマホ（間違えて選んだ人のスマホを含む）が使えなくなるよう合言葉も新しくします
-    if (patch.releaseClaim === true) { p.claimedAt = null; p.token = newToken_(db); }
+    if (patch.releaseClaim === true) { p.claimedAt = null; p.claimKey = null; p.token = newToken_(db); }
     save_(db);
     return adminState_(db);
   });
@@ -199,6 +223,7 @@ function adminDrawAll(key) {
     const free = freeSeats_(db);
     if (!free.length) throw new Error('空いている席がありません。抽選席数を増やしてください。');
     shuffle_(free);
+    shuffle_(targets); // 席が足りないとき、名簿の上の方の人から決まらないように順番もくじにします
     const at = now_();
     let count = 0;
     targets.forEach(function (p) {
@@ -238,7 +263,7 @@ function adminSaveSettings(key, s) {
       if (ev.length > MAX_EVENT_) throw new Error('会の名前は' + MAX_EVENT_ + '文字以内で入力してください。');
       st.event = ev;
     }
-    if (s.drinks !== undefined) st.drinks = checkMenu_(s.drinks);
+    if (s.drinks !== undefined) { st.drinks = checkMenu_(s.drinks); st.drinksRaw = st.drinks.join('\n'); }
     if (s.drinkOpen !== undefined) {
       if (typeof s.drinkOpen !== 'boolean') throw new Error('ドリンクの受付の設定が正しくありません。');
       st.drinkOpen = s.drinkOpen;
@@ -260,7 +285,7 @@ function adminReissueToken(key, id) {
     const db = load_(true);
     const p = findById_(db, id);
     p.token = newToken_(db);
-    p.claimedAt = null; // 古いスマホは使えなくなるので、共通QRから選び直せるようにします
+    p.claimedAt = null; p.claimKey = null; // 古いスマホは使えなくなるので、共通QRから選び直せるようにします
     save_(db);
     return adminState_(db);
   });
@@ -285,7 +310,7 @@ function adminReset(key, scope) {
     const db = load_(true);
     if (scope === 'all') db.people = [];
     db.people.forEach(function (p) {
-      if (scope === 'seats') { p.seat = null; p.drawnAt = null; p.claimedAt = null; }
+      if (scope === 'seats') { p.seat = null; p.drawnAt = null; }
       if (scope === 'drinks') { p.drink = null; p.drinkAt = null; }
     });
     save_(db);
@@ -364,8 +389,9 @@ function menuResetAdminKey() {
 
 /* ================= ここから内部処理（すべて末尾「_」） ================= */
 
-function clean_(t) { return String(t).normalize('NFKC').trim().replace(/\s+/g, ' '); }
-function tidy_(t) { return String(t).trim().replace(/\s+/g, ' '); }
+const ZW_ = /[\u200B-\u200D\u2060\uFEFF\u00AD]/g; // 目に見えない文字（ゼロ幅スペースなど）
+function clean_(t) { return String(t).replace(ZW_, '').normalize('NFKC').trim().replace(/\s+/g, ' '); }
+function tidy_(t) { return String(t).replace(ZW_, '').trim().replace(/\s+/g, ' '); }
 function esc_(t) { return String(t).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function now_() { return Utilities.formatDate(new Date(), TZ_, 'yyyy/MM/dd HH:mm:ss'); }
 function has_(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
@@ -375,9 +401,14 @@ function getUi_() {
   try { return SpreadsheetApp.getUi() || null; } catch (err) { return null; }
 }
 
+function persistIfDirty_(db) {
+  if (!db.dirty) return db;
+  return withLock_(function () { const d = load_(true); if (d.dirty) save_(d); return d; });
+}
+
 function withLock_(fn) {
   const lock = LockService.getScriptLock();
-  try { lock.waitLock(10000); } catch (err) { throw new Error('ただいま混み合っています。少し待ってから、もう一度お試しください。'); }
+  try { lock.waitLock(10000); } catch (err) { throw new Error(ERR_BUSY_); }
   try { return fn(); } finally { lock.releaseLock(); }
 }
 
@@ -441,7 +472,7 @@ function checkMenu_(list) {
   if (!Array.isArray(list)) throw new Error('ドリンクメニューを入力してください。');
   const out = [];
   list.forEach(function (x) {
-    if (x === null || x === undefined) return;
+    if (typeof x !== 'string') return;
     const d = clean_(x);
     if (!d) return;
     if (d.length > MAX_DRINK_) throw new Error('「' + d.slice(0, 20) + '」は長すぎます。ドリンク名は' + MAX_DRINK_ + '文字以内で入力してください。');
@@ -487,11 +518,13 @@ function writeHeaders_(sh) {
 function ensurePeopleSheet_(ss) {
   let sh = ss.getSheetByName(SHEET_PEOPLE_);
   if (!sh) { sh = ss.insertSheet(SHEET_PEOPLE_); writeHeaders_(sh); }
-  else if (sh.getLastRow() >= 1 && String(sh.getRange(1, HEADERS_.length).getValue()) !== HEADERS_[HEADERS_.length - 1]) writeHeaders_(sh); // 以前の版（列が少ない）から見出しを足します
+  else if (sh.getLastRow() >= 1 && sh.getRange(1, 1, 1, HEADERS_.length).getValues()[0].map(String).join('\t') !== HEADERS_.join('\t')) writeHeaders_(sh); // 以前の版（列が少ない）から見出しを足します
   return sh;
 }
 
-function ensureSettingsSheet_(ss) {
+function ensureSettingsSheet_(ss) { return ensureSettings_(ss).sheet; }
+
+function ensureSettings_(ss) {
   let sh = ss.getSheetByName(SHEET_SETTINGS_);
   const fresh = !sh;
   if (!sh) sh = ss.insertSheet(SHEET_SETTINGS_);
@@ -502,7 +535,7 @@ function ensureSettingsSheet_(ss) {
     if (!rows.some(function (r) { return r[0] === k; })) { rows.push([k, defaults[k]]); changed = true; }
   });
   if (changed) writeKeyValues_(sh, rows);
-  return sh;
+  return { sheet: sh, rows: rows };
 }
 
 function readKeyValues_(sh) {
@@ -530,7 +563,7 @@ function parseSettings_(rows) {
   const seats = Number(m.seats);
   const drinksRaw = m.drinks === undefined ? DEFAULT_DRINKS_.join('\n') : String(m.drinks);
   const drinks = [];
-  drinksRaw.split(/\r?\n/).forEach(function (x) { const d = clean_(x); if (d && d.length <= MAX_DRINK_ && drinks.indexOf(d) < 0 && drinks.length < MAX_DRINKS_) drinks.push(d); });
+  drinksRaw.split(/\r?\n/).forEach(function (x) { const d = clean_(x); if (d && d !== UNDECIDED_ && d.length <= MAX_DRINK_ && drinks.indexOf(d) < 0 && drinks.length < MAX_DRINKS_) drinks.push(d); });
   const open = m.drinkOpen;
   const url = m.baseUrl === undefined || m.baseUrl === null ? '' : String(m.baseUrl).trim();
   const join = m.joinCode === undefined || m.joinCode === null ? '' : String(m.joinCode).trim();
@@ -538,6 +571,7 @@ function parseSettings_(rows) {
     seats: Number.isInteger(seats) && seats >= 1 && seats <= MAX_SEATS_ ? seats : DEFAULT_SEATS_,
     event: m.event === undefined || m.event === null ? '' : tidy_(m.event).slice(0, MAX_EVENT_),
     drinks: drinks,
+    drinksRaw: drinksRaw, // メニューを変更しない保存では、シートの文字をそのまま書き戻します（21個目以降などを消さないため）
     drinkOpen: !(open === false || String(open).trim().toUpperCase() === 'FALSE'),
     baseUrl: /^https:\/\//.test(url) ? url : '',
     joinCode: /^[A-Za-z0-9]{8,64}$/.test(join) ? join : '',
@@ -554,7 +588,7 @@ function readSettingsOnly_() {
 
 function saveSettings_(db) {
   const st = db.settings;
-  const vals = { seats: String(st.seats), event: st.event, drinks: st.drinks.join('\n'), drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl,
+  const vals = { seats: String(st.seats), event: st.event, drinks: st.drinksRaw, drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl,
     joinCode: st.joinCode || randomString_(12), joinOpen: st.joinOpen ? 'TRUE' : 'FALSE' };
   st.joinCode = vals.joinCode;
   const rows = st.rows.map(function (r) { return [r[0], has_(vals, r[0]) ? vals[r[0]] : r[1]]; });
@@ -579,25 +613,40 @@ function cellText_(v) {
 function load_(locked) {
   const ss = spreadsheet_();
   const sheet = locked ? ensurePeopleSheet_(ss) : ss.getSheetByName(SHEET_PEOPLE_);
-  const settingsSheet = locked ? ensureSettingsSheet_(ss) : ss.getSheetByName(SHEET_SETTINGS_);
-  const settings = parseSettings_(settingsSheet ? readKeyValues_(settingsSheet) : []);
-  const db = { sheet: sheet, settingsSheet: settingsSheet, settings: settings, people: [], dirty: false };
+  let settingsSheet, rows;
+  if (locked) { const e = ensureSettings_(ss); settingsSheet = e.sheet; rows = e.rows; }
+  else { settingsSheet = ss.getSheetByName(SHEET_SETTINGS_); rows = settingsSheet ? readKeyValues_(settingsSheet) : []; }
+  const settings = parseSettings_(rows);
+  const W = HEADERS_.length;
+  const db = { sheet: sheet, settingsSheet: settingsSheet, settings: settings, people: [], ghosts: [], width: W, dirty: false };
   const last = sheet ? sheet.getLastRow() : 0;
   if (last >= 2) {
-    const values = sheet.getRange(2, 1, last - 1, HEADERS_.length).getValues();
-    const ids = Object.create(null), tokens = Object.create(null);
+    // 幹事が右側に足したメモなどの列も読み、行を詰めるときに一緒に動かします（別の人の行にずれないように）
+    db.width = Math.max(W, sheet.getLastColumn());
+    const values = sheet.getRange(2, 1, last - 1, db.width).getValues();
+    const tokenCount = Object.create(null);
+    values.forEach(function (r) { const t = cellText_(r[1]); if (t) tokenCount[t] = (tokenCount[t] || 0) + 1; });
+    const ids = Object.create(null);
     values.forEach(function (r, i) {
-      const name = cellText_(r[2]);
-      if (!name) { if (r.some(function (c) { return c !== '' && c !== null; })) db.dirty = true; return; }
-      let id = cellText_(r[0]), token = cellText_(r[1]);
+      const blank = !r.some(function (c) { return c !== '' && c !== null; });
+      if (blank) { db.dirty = true; return; } // 途中の空行は詰めます
+      const name = cellText_(r[2]) ? tidy_(cellText_(r[2])) : '';
+      if (!name) {
+        // お名前だけ消えている行（打ち直しの途中など）は、消さずにそのまま残します。席も使用中として扱います
+        db.ghosts.push({ raw: r, seat: seatOf_(r[4]) });
+        return;
+      }
+      const id = cellText_(r[0]), token = cellText_(r[1]);
       const kind = cellText_(r[3]) === '固定' || cellText_(r[3]) === 'fixed' ? 'fixed' : 'lottery';
-      let seat = r[4] === '' || r[4] === null ? NaN : Number(String(r[4]).trim());
-      seat = kind === 'lottery' && Number.isInteger(seat) && seat >= 1 ? seat : null;
-      const p = { id: id, token: token, name: tidy_(name), kind: kind, seat: seat, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]), claimedAt: cellText_(r[8]), row: i + 2 };
+      const rawSeat = seatOf_(r[4]);
+      const seat = kind === 'lottery' ? rawSeat : null;
+      const p = { id: id, token: token, name: name, kind: kind, seat: seat, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]),
+        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), extra: r.slice(W), row: i + 2 };
+      if (rawSeat === null && r[4] !== '' && r[4] !== null) db.dirty = true;
       if (!p.id || ids[p.id]) { p.id = null; db.dirty = true; }
-      if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokens[p.token]) { p.token = null; db.dirty = true; }
+      // 同じトークンが複数の行にあったら（行のコピーなど）、どちらのQRでも他人の記録を触れないよう全員分を作り直します
+      if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokenCount[p.token] > 1) { p.token = null; p.claimedAt = null; p.claimKey = null; db.dirty = true; }
       if (p.id) ids[p.id] = true;
-      if (p.token) tokens[p.token] = true;
       db.people.push(p);
     });
     // 同じ席番号が重複していたら（手で編集した場合など）、後ろの人の席を空きに戻します。
@@ -607,6 +656,7 @@ function load_(locked) {
       if (taken[p.seat]) { p.seat = null; p.drawnAt = null; db.dirty = true; }
       else taken[p.seat] = true;
     });
+    db.ghosts.forEach(function (g) { if (g.seat !== null) { if (taken[g.seat]) g.seat = null; else taken[g.seat] = true; } });
     // ID・トークンが無い行（スプレッドシートに直接書き足した行）には新しく付けます。
     db.people.forEach(function (p) {
       if (!p.id) p.id = newId_(db);
@@ -616,20 +666,37 @@ function load_(locked) {
   return db;
 }
 
-function rowValues_(p) {
-  return [p.id, p.token, p.name, p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, p.drink || '', p.drawnAt || '', p.drinkAt || '', p.claimedAt || ''];
+/* 席番号のセル → 1〜99 の整数、それ以外は null */
+function seatOf_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = Number(String(v).trim());
+  return Number.isInteger(n) && n >= 1 && n <= MAX_SEATS_ ? n : null;
 }
+
+function rowValues_(p) {
+  return [p.id, p.token, p.name, p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, p.drink || '', p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
+}
+
+function pad_(a, n) { const out = (a || []).slice(0, n); while (out.length < n) out.push(''); return out; }
 
 /* 全員分を書き込みます。先に全体を消さず上書きし、行が減った分だけ消します（同時に読んでいる実行が空の名簿を見ないように）。 */
 function save_(db) {
-  const sh = db.sheet, n = db.people.length, last = sh.getLastRow();
+  const sh = db.sheet, W = HEADERS_.length, width = Math.max(W, db.width || W), last = sh.getLastRow();
+  const extraW = width - W;
+  const rows = db.people.map(function (p) { return rowValues_(p).concat(pad_(p.extra, extraW)); })
+    .concat(db.ghosts.map(function (g) {
+      const r = pad_(g.raw, width);
+      for (let c = 0; c < W; c++) r[c] = c === COL_SEAT_ - 1 ? (g.seat === null ? '' : g.seat) : (cellText_(r[c]) || '');
+      return r;
+    }));
+  const n = rows.length;
   if (n) {
-    const range = sh.getRange(2, 1, n, HEADERS_.length);
+    const range = sh.getRange(2, 1, n, W);
     range.setNumberFormat('@'); // 利用者の入力が数式や日付・数値として解釈されないように書式なしテキストにします
     sh.getRange(2, COL_SEAT_, n, 1).setNumberFormat('0');
-    range.setValues(db.people.map(rowValues_));
+    sh.getRange(2, 1, n, width).setValues(rows);
   }
-  if (last > n + 1) sh.getRange(n + 2, 1, last - n - 1, HEADERS_.length).clearContent();
+  if (last > n + 1) sh.getRange(n + 2, 1, last - n - 1, width).clearContent();
   db.people.forEach(function (p, i) { p.row = i + 2; });
   db.dirty = false;
   SpreadsheetApp.flush();
@@ -658,7 +725,7 @@ function newToken_(db) {
 }
 
 function newPerson_(db, name, kind) {
-  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, row: 0 };
+  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, claimKey: null, extra: [], row: 0 };
 }
 
 function findByToken_(db, token) {
@@ -677,6 +744,7 @@ function findById_(db, id) {
 function freeSeats_(db) {
   const taken = Object.create(null);
   db.people.forEach(function (p) { if (p.seat !== null) taken[p.seat] = true; });
+  (db.ghosts || []).forEach(function (g) { if (g.seat !== null) taken[g.seat] = true; });
   const free = [];
   for (let s = 1; s <= db.settings.seats; s++) if (!taken[s]) free.push(s);
   return free;
