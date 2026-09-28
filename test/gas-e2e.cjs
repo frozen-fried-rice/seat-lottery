@@ -651,6 +651,77 @@ async function step(name, fn) {
       await pg.context().close();
     });
 
+    await step('10) 幹事画面の競合：修正画面の最新化・削除済みの方・保存中の入力・遅れた失敗・検索・プロジェクター表示', async () => {
+      const pg = await newPage(browser, 'admin-race', { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminAddPeople', [KEY, ['競合 花子', 'tanaka Taro'], 'lottery']);
+      await pg.click('#refresh'); await waitStatus(pg, /最新の状態/);
+      // (a) 開く直前に参加者がドリンクを登録 → 修正画面は最新のドリンクを表示し、「未登録」に戻せる
+      const hk = state().people.find(p => p.name === '競合 花子');
+      callServer(ctx, 'participantSetDrink', [hk.token, 'ビール']);
+      await pg.locator('#drinkrows tr', { hasText: '競合 花子' }).getByRole('button', { name: /修正/ }).click();
+      await pg.waitForFunction(() => document.getElementById('editdrink').value === 'm:ビール');
+      await pg.selectOption('#editdrink', '');
+      await pg.click('#editform button[type=submit]');
+      await waitStatus(pg, /修正しました/);
+      assert.equal(state().people.find(p => p.name === '競合 花子').drink, null);
+      // (b) 開いている間に削除された → 画面を閉じて知らせる
+      await pg.locator('#drinkrows tr', { hasText: '競合 花子' }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#editdialog[open]').waitFor();
+      callServer(ctx, 'adminDeletePerson', [KEY, hk.id]);
+      await pg.click('#editcancel');
+      await pg.click('#refresh');
+      await pg.locator('#drinkrows tr', { hasText: '競合 花子' }).waitFor({ state: 'detached' });
+      // (c) 保存中に書き足した会の名前は消えない
+      await pg.click('#tab-setup');
+      faults.push({ label: 'admin-race', name: 'adminSaveSettings', mode: 'delay', ms: 800 });
+      await pg.fill('#event', '送別会');
+      await pg.click('#eventsave');
+      await pg.locator('#event').press('End');
+      await pg.locator('#event').pressSequentially(' 2026');
+      await waitStatus(pg, /会の名前を保存しました/);
+      assert.equal(await pg.inputValue('#event'), '送別会 2026', '保存中の入力が残る');
+      assert.equal(await pg.locator('#eventsave').evaluate(b => b.classList.contains('dirty')), true, '未保存の表示が残る');
+      await pg.click('#eventsave'); await waitStatus(pg, /会の名前を保存しました/);
+      await pg.fill('#event', '送別会'); await pg.click('#eventsave'); await waitStatus(pg, /会の名前を保存しました/);
+      // (d) 英語の通信エラーは日本語で表示
+      await pg.click('#tab-drinks');
+      faults.push({ label: 'admin-race', name: 'adminGetState', mode: 'fail' });
+      await pg.click('#refresh');
+      await pg.locator('#error').waitFor({ state: 'visible' });
+      assert.match(await text(pg, '#errortext'), /^通信に失敗しました/);
+      await pg.click('#errorclose');
+      // (e) 検索：大文字小文字・空白・「12 番」
+      await pg.click('#tab-drinks');
+      await pg.fill('#drinksearch', 'TANAKATARO');
+      assert.match(await text(pg, '#drinkrows'), /tanaka Taro/);
+      const seated = state().people.find(p => p.seat != null);
+      await pg.fill('#drinksearch', seated.seat + ' 番');
+      assert.match(await text(pg, '#drinkrows'), new RegExp(seated.name));
+      await pg.fill('#drinksearch', '');
+      // (f) 受付をやり直す のチェック欄で修正画面が横にはみ出さない（スマホ幅）
+      await pg.setViewportSize({ width: 320, height: 700 });
+      const claimedP = state().people.find(p => p.claimedAt);
+      await pg.fill('#drinksearch', claimedP.name);
+      await pg.locator('#drinkrows tr', { hasText: claimedP.name }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#releasewrap').waitFor({ state: 'visible' });
+      const [sw, cw] = await pg.locator('#editdialog').evaluate(d => [d.scrollWidth, d.clientWidth]);
+      assert.ok(sw <= cw, '修正画面が横にはみ出さない ' + sw + '/' + cw);
+      await pg.keyboard.press('Escape');
+      await pg.setViewportSize({ width: 1280, height: 900 });
+      await pg.fill('#drinksearch', '');
+      // (g) プロジェクター用の表示は別のタブで開き、合言葉を含まない
+      await pg.click('#tab-qr');
+      const [popup] = await Promise.all([pg.context().waitForEvent('page'), pg.click('#joinshow')]);
+      await popup.waitForLoadState();
+      assert.equal(popup.url().includes(KEY), false);
+      assert.equal(await popup.locator('svg').count(), 1);
+      assert.match(await popup.locator('body').innerText(), /お名前を選んでください/);
+      await popup.close();
+      await pg.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });
