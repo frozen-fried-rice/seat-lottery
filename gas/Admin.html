@@ -334,6 +334,9 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
 'use strict';
 const $=id=>document.getElementById(id);
 const REFRESH_MS=20000;
+// 古いブラウザ（iOS 15.3 以前など）は、確認や修正の画面（dialog）が使えません
+const NO_DIALOG=typeof HTMLDialogElement==='undefined'||!('showModal' in HTMLDialogElement.prototype);
+const NO_DIALOG_MSG='このブラウザでは幹事画面の一部（修正・QR表示・確認の画面）が使えません。パソコンのChromeなど新しいブラウザで開いてください。';
 let key='',S=null,view='drinks',busy=0,seq=0,applied=0,lastLoad=0,editing=null,qrId=null;
 
 function clean(t){return String(t==null?'':t).normalize('NFKC').trim().replace(/\s+/g,' ');}
@@ -626,8 +629,10 @@ function render(){
  const st=S.settings,sm=S.summary;
  $('eventhead').textContent=st.event||'';$('eventhead').hidden=!st.event;
  const over=sm.lottery-st.seats;
- $('warn').hidden=!(over>0);
- if(over>0)$('warn').textContent='くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。「名簿・設定」で席数を増やすか、固定席に変えてください。';
+ const warns=[];
+ if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。「名簿・設定」で席数を増やすか、固定席に変えてください。');
+ if(NO_DIALOG)warns.push(NO_DIALOG_MSG);
+ $('warn').hidden=!warns.length;$('warn').textContent=warns.join('　');
  for(const b of document.querySelectorAll('.drinkopen')){
   b.setAttribute('aria-checked',String(!!st.drinkOpen));
   b.querySelector('.swtext').textContent=st.drinkOpen?'受付中':'締め切り';
@@ -1012,10 +1017,7 @@ $('linkcsv').onclick=()=>{
 
 /* 起動 */
 render();
-// 古いブラウザ（iOS 15.3 以前など）は、確認や修正の画面（dialog）が使えません
-if(typeof HTMLDialogElement==='undefined'||!('showModal' in HTMLDialogElement.prototype)){
- const w=$('warn');w.hidden=false;w.textContent='このブラウザでは幹事画面の一部（修正・QR表示・確認の画面）が使えません。パソコンのChromeなど新しいブラウザで開いてください。';
-}
+if(NO_DIALOG){const w=$('warn');w.hidden=false;w.textContent=NO_DIALOG_MSG;}
 if(typeof google==='undefined'||!google.script||!google.script.url){
  $('loading').hidden=true;showError(Error('この画面は Google Apps Script の Webアプリとして開いてください。'));
 }else{
