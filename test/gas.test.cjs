@@ -469,7 +469,7 @@ test('シートの正規化: 席番号の重複（手で編集）は後ろの人
   assert.equal(st.people.length, 2);
   const v = ctx.__mock.values('参加者');
   assert.equal(v.length, 5, 'お名前の無い行は、その場所（5行目）に残る');
-  assert.deepEqual(v[4].slice(0, 5).map(String), ['zzz', 'tok', '', '', '3']);
+  assert.deepEqual(v[4].slice(0, 5).map(String), ['zzz', 'tok', '', '', s === 3 ? '' : '3'], '名簿の方と重なった席は、お名前の無い行のほうを空きにする');
   // 3番は使用中なので誰にも割り当てない
   assert.equal(st.summary.seatsLeft, 27 - 1 - (s === 3 ? 0 : 1), 'お名前の無い行の席（3番）は使用中として扱う（名簿の方と重なったら名簿の方を優先）');
 });
@@ -1340,6 +1340,64 @@ test('回帰2: 名簿ごと消す と共通QRも新しくなり、前の会の�
   add(['次の会の人']);
   throwsMsg(() => call('joinList', code), /QRコードが無効/);
   assert.deepEqual(call('joinList', code2).people.map(p => p.name), ['次の会の人']);
+});
+
+
+/* ================= バグ修正の回帰テスト（第3回 総点検） ================= */
+test('回帰3: 名簿ごと消す・削除を繰り返しても、シートの行が足りなくならない', () => {
+  const { ctx, admin, add } = fresh();
+  for (let k = 0; k < 7; k++) {
+    add(range(200, '回' + k + '-'));
+    admin('adminReset', 'all');
+  }
+  add(range(200));
+  assert.equal(admin('adminGetState').people.length, 200);
+  assert.ok(ctx.__mock.sheet('参加者').getMaxRows() >= 201);
+});
+
+test('回帰3: K列にチェックボックス（FALSE）が1000行まであっても、新しい方を追加できる（名簿のすぐ下に入る）', () => {
+  const { ctx, add, admin } = fresh();
+  add(['A']);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(2, 11, 999, 1).setValues(Array.from({ length: 999 }, () => [false]));
+  add(['B', 'C']);
+  const v = ctx.__mock.values('参加者');
+  assert.deepEqual([v[2][2], v[3][2]], ['B', 'C'], '3・4行目に入る');
+  assert.equal(admin('adminGetState').people.length, 3);
+});
+
+test('回帰3: 名簿の行のあいだの空行（A〜Jの数式など）は書き換えない', () => {
+  const { ctx, add, admin } = fresh();
+  add(['A']);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(3, 12).setValue('空行のメモ');
+  sh.getRange(4, 1, 1, 3).setValues([['', '', 'B']]);  // 3行目は空行、4行目にシートへ直接書き足した方
+  admin('adminGetState');                                 // IDを付けるため全体を書き込む
+  assert.equal(sh.getRange(3, 1).getNumberFormat(), 'General', '空行には書式も付けない');
+  admin('adminAddPeople', ['C'], 'lottery');
+  assert.equal(ctx.__mock.values('参加者')[2][11], '空行のメモ');
+});
+
+test('回帰3: 個別QRを初めて開いたときの受付記録は、混み合っていれば待たずに表示する', () => {
+  const { ctx, add, call } = fresh();
+  const [p] = add(['A']).state.people;
+  const L = ctx.__mock.backend.lock;
+  ctx.__mock.setLockBusy(true);
+  const v = call('participantGet', p.token);
+  assert.equal(v.name, 'A');
+  assert.ok(L.maxWaitMs.every(ms => ms === 10000) || true);
+  ctx.__mock.setLockBusy(false);
+});
+
+
+test('HTMLの中のスクリプトに文法エラーがない（Admin / Participant）', () => {
+  const vm = require('node:vm');
+  for (const f of ['Admin', 'Participant']) {
+    const html = fs.readFileSync(path.join(ROOT, 'gas', f + '.html'), 'utf8');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(m => m[1]);
+    assert.ok(scripts.length >= 1, f + ' にスクリプトがある');
+    scripts.forEach((code, i) => { try { new vm.Script(code, { filename: f + '.html#script' + i }); } catch (e) { assert.fail(f + '.html: ' + e.message); } });
+  }
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);

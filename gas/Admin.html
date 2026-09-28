@@ -947,10 +947,11 @@ $('joinshow').onclick=()=>{
   'svg{width:min(70vh,86vw);height:auto;display:block}</style></head><body><main>'+
   (S.settings.event?'<p style="font-weight:700;color:#193961">'+esc(S.settings.event)+'</p>':'')+
   '<h1>席くじ・ドリンク受付</h1>'+svg+'<p>スマホのカメラで読み取って、ご自身のお名前を選んでください。</p></main></body></html>';
- const u=URL.createObjectURL(new Blob([html],{type:'text/html'})),w=window.open(u,'_blank');
- setTimeout(()=>URL.revokeObjectURL(u),w?60000:0);
- if(!w)showError(Error('新しいタブを開けませんでした。ブラウザのポップアップの設定をご確認ください。'));
- else ok('共通QRを別のタブで開きました。そのタブをプロジェクターに映してください（この幹事画面は映さないでください）。');
+ // 空のタブを開いて中身を書き込みます（一時URL（blob）は、最近のブラウザでは開いたタブを操作できず失敗扱いになるため使いません）
+ const w=window.open('','_blank');
+ if(!w){showError(Error('新しいタブを開けませんでした。ブラウザのポップアップの設定をご確認ください。'));return;}
+ w.document.open();w.document.write(html);w.document.close();
+ ok('共通QRを別のタブで開きました。そのタブをプロジェクターに映してください（この幹事画面は映さないでください）。');
 };
 $('joinprint').onclick=()=>{
  const url=S&&S.settings.joinUrl,svg=url?qrSvgCached(url):null;

@@ -53,16 +53,14 @@ function participantGet(token) {
   const p = findByToken_(db, token);
   if (p.claimedAt) return participantView_(db, p);
   // 個別QRを初めて開いた方は「受付済み」にします（共通QRの名前一覧で、ほかの人がこの方を選べないように）
+  // 受付の記録は「できれば」でよいので、ロックは少しだけ待ちます（混み合っているときは表示を優先し、記録は次の操作で付きます）
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1500)) return participantView_(db, p);
   try {
-    return withLock_(function () {
-      const d = load_(true), q = findByToken_(d, token);
-      if (!q.claimedAt) { q.claimedAt = now_(); saveRow_(d, q); }
-      return participantView_(d, q);
-    });
-  } catch (err) {
-    if (err && err.message === ERR_BUSY_) return participantView_(db, p); // 混み合っていても表示はできるように（受付の記録は次の操作で付きます）
-    throw err;
-  }
+    const d = load_(true), q = findByToken_(d, token);
+    if (!q.claimedAt) { q.claimedAt = now_(); saveRow_(d, q); }
+    return participantView_(d, q);
+  } finally { lock.releaseLock(); }
 }
 
 /*
@@ -741,20 +739,30 @@ function save_(db) {
     db.people.forEach(function (p) { if (p.row) p.row = shift(p.row); });
     db.ghosts.forEach(function (g) { if (g.row) g.row = shift(g.row); });
   }
-  let next = Math.max(1, sh.getLastRow()) + 1;
+  // 新しい方は、名簿の最後の行のすぐ下に足します（右側の列にチェックボックスなどが下まであっても、そこより下にはしません）
+  let next = 2;
+  db.people.forEach(function (p) { if (p.row >= next) next = p.row + 1; });
+  db.ghosts.forEach(function (g) { if (g.row >= next) next = g.row + 1; });
   db.people.forEach(function (p) { if (!p.row) p.row = next++; });
   const byRow = Object.create(null);
   let maxRow = 1;
   db.people.forEach(function (p) { byRow[p.row] = rowValues_(p); if (p.row > maxRow) maxRow = p.row; });
   db.ghosts.forEach(function (g) { byRow[g.row] = ghostValues_(g); if (g.row > maxRow) maxRow = g.row; });
-  if (maxRow >= 2) {
-    const n = maxRow - 1, cur = sh.getRange(2, 1, n, W).getValues(), out = [];
-    // 名簿の行以外（A〜Jが空の行）は、今の中身のまま書き戻します
-    for (let r = 2; r <= maxRow; r++) out.push(byRow[r] || cur[r - 2].map(function (v) { return v === null || v === undefined ? '' : v; }));
-    const range = sh.getRange(2, 1, n, W);
+  // 行を削除するとシートの行数が減るので、足りなければ足します
+  const maxRows = sh.getMaxRows();
+  if (maxRow > maxRows) sh.insertRowsAfter(maxRows, maxRow - maxRows);
+  // 名簿の行だけを、続いているところごとにまとめて書き込みます（あいだの空行には触れません）
+  for (let r = 2; r <= maxRow;) {
+    if (!byRow[r]) { r++; continue; }
+    let e = r;
+    while (e + 1 <= maxRow && byRow[e + 1]) e++;
+    const n = e - r + 1, out = [];
+    for (let k = r; k <= e; k++) out.push(byRow[k]);
+    const range = sh.getRange(r, 1, n, W);
     range.setNumberFormat('@'); // 利用者の入力が数式や日付・数値として解釈されないように書式なしテキストにします
-    sh.getRange(2, COL_SEAT_, n, 1).setNumberFormat('0');
+    sh.getRange(r, COL_SEAT_, n, 1).setNumberFormat('0');
     range.setValues(out);
+    r = e + 1;
   }
   db.loadedRows = Object.keys(byRow).map(Number);
   db.people.forEach(function (p) { delete p.tempId; });

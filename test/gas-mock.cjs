@@ -77,6 +77,8 @@ class MockSheet {
     for (const [v, label] of [[row, 'row'], [col, 'column']]) if (!Number.isInteger(v) || v < 1) throw new Error('Exception: The starting ' + label + ' of the range is too small.');
     if (!Number.isInteger(nr) || nr < 1) throw new Error('Exception: The number of rows in the range must be at least 1.');
     if (!Number.isInteger(nc) || nc < 1) throw new Error('Exception: The number of columns in the range must be at least 1.');
+    // 実際のシートと同じく、行数・列数を超える範囲は取れません
+    if (row + nr - 1 > this.getMaxRows() || col + nc - 1 > this.getMaxColumns()) throw new Error('Exception: The coordinates of the range are outside the dimensions of the sheet.');
     this._ss._backend.stats.getRange++;
     return new MockRange(this, row, col, nr, nc);
   }
@@ -90,7 +92,7 @@ class MockSheet {
     this._cells.forEach(row => row && row.forEach((c, i) => { if (c && c.v !== '' && i > m) m = i; }));
     return m;
   }
-  getMaxRows() { return Math.max(this._maxRows === undefined ? 1000 : this._maxRows, this._cells.length - 1); }
+  getMaxRows() { return this._maxRows === undefined ? 1000 : this._maxRows; }
   // 行の削除・挿入は実際のシートと同じく、右側の列（メモや数式）も行と一緒に動きます
   deleteRow(r) { return this.deleteRows(r, 1); }
   deleteRows(r, n) {
@@ -103,6 +105,7 @@ class MockSheet {
     return this;
   }
   insertRowsAfter(r, n) { const max = this.getMaxRows(); if (this._cells.length > r + 1) this._cells.splice(r + 1, 0, ...new Array(n)); this._maxRows = max + n; return this; }
+  insertRows(r, n) { return this.insertRowsAfter(r - 1, n || 1); }
   insertColumnBefore(c) { this._cells.forEach(row => { if (row && row.length > c) row.splice(c, 0, undefined); }); return this; }
   getMaxColumns() { return 26; }
   setFrozenRows(n) { this._frozen = n; return this; }
