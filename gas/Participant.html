@@ -39,6 +39,15 @@ button:disabled{cursor:default;opacity:.55}
 .msg.ng{color:#a02a18;font-weight:700}
 .current{font-size:22px;font-weight:800;color:#193961;margin:8px 0 0;overflow-wrap:anywhere}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.search{width:100%;font:inherit;font-size:17px;min-height:52px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff;margin:0 0 12px}
+.names{display:grid;gap:8px;text-align:left}
+.names button{width:100%;min-height:54px;text-align:left;font-size:17px;padding:12px 16px;overflow-wrap:anywhere;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.names button .tag{font-size:12px;font-weight:700;color:#5b708c;flex:none}
+.names button:disabled{opacity:1;background:#f4f6fa;color:#8a97aa}
+.names .empty{color:#617087;font-size:15px;margin:6px 2px}
+.confirmname{font-size:26px;font-weight:800;color:#193961;margin:6px 0 4px;overflow-wrap:anywhere}
+.stack{display:grid;gap:10px;margin-top:18px}
+.switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
 [hidden]{display:none!important}
 @media (max-width:340px){.drinks{grid-template-columns:1fr}.number{font-size:92px}}
 @media (prefers-reduced-motion:reduce){.pop{animation:none}}
@@ -66,6 +75,27 @@ button:disabled{cursor:default;opacity:.55}
   <p class="hint" id="resulthint" hidden>テーブルの番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
   <button class="again" id="again" hidden>もう一度演出を見る</button>
  </div>
+ <div id="join" hidden>
+  <p class="event" data-ev></p>
+  <h1 style="font-size:24px">お名前を選んでください</h1>
+  <p class="lead" style="margin-bottom:16px">ご自身のお名前をタップしてください。</p>
+  <p class="err" id="joinerr" role="alert" hidden></p>
+  <label class="sr" for="joinsearch">お名前で絞り込み</label>
+  <input class="search" id="joinsearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="お名前の一部で絞り込み（例：やま）">
+  <div class="names" id="joinlist"></div>
+  <p class="hint" style="margin:16px 0 0">お名前が見つからないときは、受付にお声がけください。</p>
+ </div>
+ <div id="confirm" hidden>
+  <p class="event" data-ev></p>
+  <p class="lead" style="margin:0">このお名前で受付します。</p>
+  <p class="confirmname" id="confirmname"></p>
+  <p class="hint">一度選ぶと、ほかのスマホからはこのお名前を選べなくなります。</p>
+  <p class="err" id="confirmerr" role="alert" hidden></p>
+  <div class="stack">
+   <button class="primary" id="confirmyes">はい、自分です</button>
+   <button id="confirmno">戻る</button>
+  </div>
+ </div>
  <div id="fixed" hidden>
   <p class="event" data-ev></p>
   <h1 id="fixedname"></h1>
@@ -89,6 +119,7 @@ button:disabled{cursor:default;opacity:.55}
   <p class="current" id="drinkcurrent"></p>
  </div>
 </section>
+<button class="switch" id="switchperson" hidden>ほかの方の受付をする（このスマホで続けて選ぶ）</button>
 <script>
 'use strict';
 const $=id=>document.getElementById(id);
@@ -96,6 +127,7 @@ const UNDECIDED='未定';
 const reduced=()=>{try{return window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}};
 const clean=t=>String(t==null?'':t).normalize('NFKC').trim().replace(/\s+/g,' ');
 let token='',view=null,rolling=null,drawing=false,saving=false,otherOpen=false;
+let joinCode='',joinPeople=[],picked=null,claiming=false;
 
 const NET_ERR='通信に失敗しました。電波の良い場所で、もう一度お試しください。';
 // サーバーのエラー文は「Error: 」などが付いて届くことがあるので取り除きます
@@ -109,8 +141,17 @@ function run(fn,args,ok,ng,tries){
   r[fn].apply(r,args);
  }catch(e){ng(NET_ERR);}
 }
-function show(id){for(const s of ['loading','bad','intro','result','fixed'])$(s).hidden=s!==id;}
+function show(id){
+ for(const s of ['loading','bad','intro','result','fixed','join','confirm'])$(s).hidden=s!==id;
+ // 共通QRで開いたときは、同じスマホで別の方を受付できるようにします（スマホを持っていない方の代わりなど）
+ $('switchperson').hidden=!(joinCode&&token&&(id==='intro'||id==='result'||id==='fixed'));
+}
 function bad(msg){stopRoll();show('bad');$('badmsg').textContent=msg||'QRコードが無効です。受付にお声がけください。';$('drinkbox').hidden=true;}
+// 個別のトークンが使えなくなったとき（幹事がQRを作り直した・受付をやり直した）。共通QRなら名前選びに戻ります
+function badToken(m){
+ if(joinCode){stopRoll();remember('');joinLoad('このスマホでの受付は取り消されました。もう一度お名前を選んでください。');}
+ else bad(m);
+}
 function setCommon(v){
  document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=v.event||'';e.hidden=!v.event;});
  $('name').textContent=v.name+' さん';
@@ -140,6 +181,72 @@ function showSeat(v){
  $('announce').textContent=v.name+' さんのお席は '+v.seat+'番 です。';
  $('resulthint').hidden=false;$('again').hidden=false;
 }
+/* ---- 共通QR（全員同じQR）：名前を選ぶ ---- */
+// 選んだ方のトークンはこのスマホに覚えておき、同じQRをもう一度読み取ったときに名前選びを省きます
+const storeKey=()=>'sekikuji.join.'+joinCode;
+function remembered(){try{return localStorage.getItem(storeKey())||'';}catch(e){return '';}}
+function remember(t){try{if(t)localStorage.setItem(storeKey(),t);else localStorage.removeItem(storeKey());}catch(e){}}
+function joinStart(){
+ const t=remembered();
+ if(t){
+  token=t;show('loading');
+  // 通信エラーのときは覚えたトークンを消さずに「もう一度読み込む」を出します
+  run('participantGet',[t],v=>render(v,true),m=>{if(/QRコード/.test(m)){remember('');token='';joinLoad('このスマホでの受付は取り消されました。もう一度お名前を選んでください。');}else bad(m);});
+ }else joinLoad();
+}
+function joinLoad(msg){
+ token='';view=null;show('loading');$('drinkbox').hidden=true;
+ run('joinList',[joinCode],r=>{
+  joinPeople=r.people||[];
+  document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=r.event||'';e.hidden=!r.event;});
+  show('join');renderJoin();
+  const e=$('joinerr');e.textContent=msg||'';e.hidden=!msg;
+ },m=>bad(m));
+}
+function renderJoin(){
+ const q=clean($('joinsearch').value).toLowerCase();
+ const hit=joinPeople.filter(p=>!q||clean(p.name).toLowerCase().includes(q));
+ // まだ受付していない方を先に、受付済みの方は後ろに（押せない状態で）並べます
+ const list=hit.filter(p=>!p.claimed).concat(hit.filter(p=>p.claimed));
+ const root=$('joinlist'),items=[];
+ for(const p of list){
+  const b=document.createElement('button');b.type='button';
+  const n=document.createElement('span');n.textContent=p.name;b.append(n);
+  if(p.claimed){const t=document.createElement('span');t.className='tag';t.textContent='受付済み';b.append(t);b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
+  else b.onclick=()=>pick(p);
+  items.push(b);
+ }
+ if(!items.length){const e=document.createElement('p');e.className='empty';e.textContent=joinPeople.length?'該当するお名前がありません。':'名簿がまだ登録されていません。受付にお声がけください。';items.push(e);}
+ root.replaceChildren(...items);
+}
+function pick(p){
+ picked=p;$('confirmname').textContent=p.name+' さん';
+ $('confirmerr').hidden=true;$('confirmyes').disabled=false;$('confirmno').disabled=false;
+ show('confirm');$('confirmyes').focus();
+}
+function claim(){
+ if(claiming||!picked)return;
+ claiming=true;$('confirmyes').disabled=true;$('confirmno').disabled=true;$('confirmyes').textContent='受付しています…';
+ run('joinClaim',[joinCode,picked.id],r=>{
+  claiming=false;$('confirmyes').textContent='はい、自分です';
+  token=r.token;remember(r.token);picked=null;
+  render(r.view,true);
+ },m=>{
+  claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
+  if(m===NET_ERR||/混み合って/.test(m)){$('confirmyes').disabled=false;const e=$('confirmerr');e.textContent=m;e.hidden=false;return;}
+  if(/受付済み/.test(m)||/該当する方/.test(m)){$('joinsearch').value='';joinLoad(m);return;}
+  bad(m);
+ });
+}
+$('joinsearch').oninput=renderJoin;
+$('confirmyes').onclick=claim;
+$('confirmno').onclick=()=>{picked=null;show('join');};
+$('switchperson').onclick=()=>{
+ if(drawing||saving)return;
+ stopRoll();remember('');$('joinsearch').value='';msg('','');otherOpen=false;$('otherinput').value='';
+ joinLoad();
+};
+
 function load(){
  show('loading');$('drinkbox').hidden=true;
  run('participantGet',[token],v=>render(v,true),msg=>bad(msg));
@@ -186,7 +293,7 @@ function draw(){
   // 幹事が区分を変えた・QRを作り直した などサーバー側が変わったときは、最新の状態を読み直して画面を切り替えます
   if(msg!==NET_ERR&&!/混み合って/.test(msg)){
    btn.disabled=true;
-   run('participantGet',[token],v=>{render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m=>{if(/QRコード/.test(m))bad(m);else btn.disabled=false;});
+   run('participantGet',[token],v=>{render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m=>{if(/QRコード/.test(m))badToken(m);else btn.disabled=false;});
   }
  });
 }
@@ -260,7 +367,7 @@ function save(drink){
  },m=>{
   saving=false;setBusy(false);msg(m,'ng',true);
   if(/締め切/.test(m))run('participantGet',[token],v=>{render(v,false);},()=>{});
-  else if(/QRコード/.test(m))run('participantGet',[token],v=>{render(v,true);},bad);
+  else if(/QRコード/.test(m))run('participantGet',[token],v=>{render(v,true);},badToken);
  });
 }
 $('otherform').onsubmit=e=>{e.preventDefault();save($('otherinput').value);};
@@ -274,6 +381,8 @@ function start(){
   google.script.url.getLocation(loc=>{
    const p=(loc&&loc.parameter)||{};
    token=typeof p.t==='string'?p.t.trim():'';
+   joinCode=!token&&typeof p.j==='string'?p.j.trim():'';
+   if(joinCode){joinStart();return;}
    if(!token){bad('QRコードが無効です。受付にお声がけください。');return;}
    load();
   });

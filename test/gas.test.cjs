@@ -44,7 +44,7 @@ test('appsscript.json: 東京・V8・匿名アクセスの Web アプリ', () =>
 
 test('クライアントから呼べる（末尾が _ でない）トップレベル関数は仕様の一覧だけ', () => {
   const names = [...CODE.matchAll(/^function\s+([A-Za-z_$][\w$]*)/gm)].map(m => m[1]).filter(n => !n.endsWith('_')).sort();
-  assert.deepEqual(names, ['adminAddPeople', 'adminDeletePerson', 'adminDrawAll', 'adminDrawOne', 'adminGetState', 'adminReissueToken', 'adminReset', 'adminSaveSettings', 'adminUpdatePerson', 'doGet', 'menuResetAdminKey', 'onOpen', 'participantDraw', 'participantGet', 'participantSetDrink', 'setup', 'showAdminUrl'].sort());
+  assert.deepEqual(names, ['adminAddPeople', 'adminDeletePerson', 'adminDrawAll', 'adminDrawOne', 'adminGetState', 'adminReissueToken', 'adminReset', 'adminResetJoinCode', 'adminSaveSettings', 'adminUpdatePerson', 'doGet', 'joinClaim', 'joinList', 'menuResetAdminKey', 'onOpen', 'participantDraw', 'participantGet', 'participantSetDrink', 'setup', 'showAdminUrl'].sort());
   // 関数式などで公開関数を作っていないこと（var/let/const で関数を代入していない）
   assert.doesNotMatch(CODE, /^(?:var|let|const)\s+[A-Za-z$][\w$]*[^_\s]\s*=\s*(?:function|\()/m);
   assert.doesNotMatch(CODE, /\b(?:require|import|export|process|module\.exports)\b[\s(.]/, 'Node の API を使っていない');
@@ -61,7 +61,7 @@ test('setup: シート・見出し・既定の設定・合言葉を作る', () =
   const { ctx, key, admin } = fresh();
   assert.match(key, /^[A-Za-z0-9]{24,}$/, '合言葉は24文字以上の英数字');
   const ppl = ctx.__mock.sheet('参加者');
-  assert.deepEqual(ppl._dump()[0], ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時']);
+  assert.deepEqual(ppl._dump()[0], ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時']);
   assert.equal(ppl.getFrozenRows(), 1);
   const settings = Object.fromEntries(ctx.__mock.values('設定').map(r => [r[0], r[1]]));
   assert.equal(Number(settings.seats), 27);
@@ -69,6 +69,8 @@ test('setup: シート・見出し・既定の設定・合言葉を作る', () =
   assert.equal(settings.drinks, 'ビール\nハイボール\nレモンサワー\nウーロン茶\nオレンジジュース\nコーラ');
   assert.equal(String(settings.drinkOpen).toUpperCase(), 'TRUE');
   assert.equal(settings.baseUrl, '');
+  assert.match(settings.joinCode, /^[A-Za-z0-9]{12}$/, '共通QRコードも作る');
+  assert.equal(String(settings.joinOpen).toUpperCase(), 'TRUE');
   assert.equal(ctx.__mock.props.SHEET_ID, ctx.__mock.spreadsheet.getId());
   assert.match(ctx.__mock.logs.join('\n'), /幹事画面のURLを表示/);
   const s = admin('adminGetState');
@@ -881,7 +883,7 @@ test('ロックの外の読み込み（participantGet / adminGetState）はシ�
   // ロックの中の書き込みで作り直される
   add(['B']);
   assert.ok(ss.getSheetByName('参加者'));
-  assert.deepEqual(ctx.__mock.values('参加者')[0], ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時']);
+  assert.deepEqual(ctx.__mock.values('参加者')[0], ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時']);
 });
 
 test('存在しないトークンでは participantDraw / participantSetDrink はロックを取らない。席がある人の再抽選もロック不要', () => {
@@ -981,6 +983,107 @@ test('シートに Date が入っていても、すべての公開 API の戻り
   assert.equal(results[0].people[0].drawnAt, '2026/09/28 18:30:00');
   assert.equal(typeof results[0].settings.event, 'string');
   void key;
+});
+
+
+/* ================= 共通QR（全員同じQR） ================= */
+const joinCodeOf = st => st.settings.joinUrl.split('?j=')[1];
+
+test('共通QR: URL・doGet・名前一覧（トークンは含まない）', () => {
+  const { ctx, add, admin, call } = fresh();
+  add(['山田', '鈴木']); add(['部長'], 'fixed');
+  const st = admin('adminGetState');
+  assert.match(st.settings.joinUrl, /^https:\/\/script\.google\.com\/macros\/s\/TESTDEPLOY\/exec\?j=[A-Za-z0-9]{12}$/);
+  assert.equal(st.settings.joinOpen, true);
+  const code = joinCodeOf(st);
+  assert.equal(ctx.doGet({ parameter: { j: code } }).getContent(), HTML.Participant, '?j= で参加者画面');
+  const list = call('joinList', code);
+  assert.deepEqual(list.people.map(p => p.name), ['山田', '鈴木', '部長']);
+  assert.deepEqual(Object.keys(list.people[0]).sort(), ['claimed', 'id', 'name'], '名前一覧にトークンや席・ドリンクは含めない');
+  assert.equal(list.people.every(p => p.claimed === false), true);
+  throwsMsg(() => call('joinList', 'wrongcode123'), /QRコードが無効/);
+  throwsMsg(() => call('joinList', ''), /QRコードが無効/);
+  throwsMsg(() => call('joinList', { toString: () => code }), /QRコードが無効/);
+});
+
+test('共通QR: 名前を選ぶとその方のトークンが渡り、以降は個別QRと同じ操作ができる。2台目からは選べない', () => {
+  const { add, admin, call, byName, rows } = fresh();
+  add(['山田', '鈴木']);
+  const code = joinCodeOf(admin('adminGetState'));
+  const yamada = byName('山田');
+  const r = call('joinClaim', code, yamada.id);
+  assert.equal(r.token, yamada.token);
+  assert.equal(r.view.name, '山田'); assert.equal(r.view.seat, null);
+  assert.equal(call('joinList', code).people.find(p => p.name === '山田').claimed, true);
+  assert.match(byName('山田').claimedAt, DATETIME);
+  assert.match(rows().find(x => x[2] === '山田')[8], DATETIME, 'シートの「受付日時」に記録');
+  throwsMsg(() => call('joinClaim', code, yamada.id), /すでに受付済み/);
+  const v = call('participantDraw', r.token);
+  assert.ok(v.seat >= 1);
+  call('participantSetDrink', r.token, 'ビール');
+  assert.equal(byName('山田').drink, 'ビール');
+  throwsMsg(() => call('joinClaim', code, 'nope'), /該当する方/);
+  throwsMsg(() => call('joinClaim', 'wrongcode123', byName('鈴木').id), /QRコードが無効/);
+});
+
+test('共通QR: 個別QRで使い始めた方は受付済みになる', () => {
+  const { add, admin, call, byName } = fresh();
+  add(['A', 'B']);
+  const code = joinCodeOf(admin('adminGetState'));
+  call('participantDraw', byName('A').token);
+  call('participantSetDrink', byName('B').token, 'コーラ');
+  const list = call('joinList', code);
+  assert.deepEqual(list.people.map(p => p.claimed), [true, true]);
+  throwsMsg(() => call('joinClaim', code, byName('A').id), /すでに受付済み/);
+});
+
+test('共通QR: 受付をやり直す・QR作り直し・席リセットで選び直せる。停止中・コード作り直しで古いQRは使えない', () => {
+  const { add, admin, call, byName } = fresh();
+  add(['A', 'B', 'C']);
+  let code = joinCodeOf(admin('adminGetState'));
+  call('joinClaim', code, byName('A').id);
+  const t0 = byName('A').token;
+  admin('adminUpdatePerson', byName('A').id, { releaseClaim: true });
+  assert.equal(byName('A').claimedAt, null);
+  assert.notEqual(byName('A').token, t0, '受付をやり直すと、名前を選んだスマホは使えなくなる');
+  throwsMsg(() => call('participantGet', t0), ERR_TOKEN);
+  call('joinClaim', code, byName('A').id);
+  const oldToken = byName('A').token;
+  admin('adminReissueToken', byName('A').id);
+  assert.equal(byName('A').claimedAt, null, 'QRを作り直すと受付もやり直し');
+  throwsMsg(() => call('participantGet', oldToken), ERR_TOKEN);
+  call('joinClaim', code, byName('B').id);
+  admin('adminReset', 'seats');
+  assert.equal(byName('B').claimedAt, null, '席のリセットで受付もやり直し');
+  let st = admin('adminSaveSettings', { joinOpen: false });
+  assert.equal(st.settings.joinOpen, false);
+  throwsMsg(() => call('joinList', code), /停止/);
+  throwsMsg(() => call('joinClaim', code, byName('C').id), /停止/);
+  throwsMsg(() => admin('adminSaveSettings', { joinOpen: 'yes' }), /共通QR/);
+  admin('adminSaveSettings', { joinOpen: true });
+  st = admin('adminResetJoinCode');
+  const code2 = joinCodeOf(st);
+  assert.notEqual(code2, code);
+  throwsMsg(() => call('joinList', code), /QRコードが無効/);
+  assert.equal(call('joinList', code2).people.length, 3);
+  throwsMsg(() => call('adminResetJoinCode', 'wrong'), ERR_KEY);
+});
+
+test('共通QR: 以前の版（受付日時の列・共通コードが無い）のシートから引き継げる', () => {
+  const { ctx, key, add, admin, call, byName } = fresh();
+  add(['A']);
+  const ppl = ctx.__mock.sheet('参加者');
+  ppl.getRange(1, 9, ppl.getLastRow(), 1).clearContent();
+  const set = ctx.__mock.sheet('設定');
+  const keep = set._dump().filter(r => r[0] !== 'joinCode' && r[0] !== 'joinOpen');
+  set.getRange(1, 1, set.getLastRow(), 2).clearContent();
+  set.getRange(1, 1, keep.length, 2).setValues(keep);
+  const st = ctx.adminGetState(key);
+  assert.match(JSON.parse(JSON.stringify(st)).settings.joinUrl, /\?j=[A-Za-z0-9]{12}$/, '幹事画面を開くと共通コードが作られる');
+  const code = joinCodeOf(admin('adminGetState'));
+  assert.equal(joinCodeOf(admin('adminGetState')), code, '2回目以降は同じコード');
+  call('joinClaim', code, byName('A').id);
+  assert.equal(ctx.__mock.values('参加者')[0][8], '受付日時', '見出しも足される');
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);

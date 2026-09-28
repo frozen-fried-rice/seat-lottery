@@ -105,7 +105,7 @@ const results = [];
 async function step(name, fn) {
   const t0 = Date.now();
   try { await fn(); results.push(['ok', name]); console.log('ok   ' + name + ' (' + (Date.now() - t0) + 'ms)'); }
-  catch (e) { results.push(['NG', name]); console.log('NG   ' + name + '\n     ' + String(e && e.stack || e).split('\n').slice(0, 4).join('\n     ')); throw e; }
+  catch (e) { results.push(['NG', name]); console.log('NG   ' + name + '\n     ' + String(e && e.stack || e).split('\n').slice(0, 8).join('\n     ')); throw e; }
 }
 
 (async () => {
@@ -453,6 +453,103 @@ async function step(name, fn) {
       await noHScroll(pg, 'admin-mobile qr dialog');
       await shot(pg, 'admin-mobile-qr', false);
       await pg.context().close();
+    });
+
+    await step('8) 全員共通のQR：名前を選ぶ→くじ→ドリンク／同じスマホは再読込で戻る／別のスマホからは選べない', async () => {
+      // 幹事画面：共通QRが表示される
+      await admin.click('#tab-qr');
+      await admin.locator('#joinqr svg').waitFor({ state: 'visible' });
+      const joinUrl = await admin.inputValue('#joinlink');
+      assert.equal(joinUrl, state().settings.joinUrl);
+      assert.match(joinUrl, /^https:\/\/script\.google\.com\/macros\/s\/TESTDEPLOY\/exec\?j=[A-Za-z0-9]{12}$/);
+      assert.equal(await admin.getAttribute('#joinopenlink', 'href'), joinUrl);
+      await shot(admin, 'admin-join');
+      const code = joinUrl.split('?j=')[1];
+      const claimedBefore = state().people.filter(p => p.claimedAt).map(p => p.name);
+      assert.ok(claimedBefore.includes(LOTTERY[0]) && claimedBefore.includes(FIXED), '個別QRで使った方は受付済み');
+      const who = state().people.find(p => p.kind === 'lottery' && !p.claimedAt);
+      assert.ok(who, 'まだ受付していない方がいる');
+
+      // 1台目のスマホ
+      const ph = await newPage(browser, 'join-phone1', { width: 390, height: 844 });
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      assert.match(await text(ph, '#join'), /送別会[\s\S]*お名前を選んでください/);
+      for (const n of claimedBefore) assert.equal(await ph.locator('#joinlist button', { hasText: n }).isDisabled(), true, n + ' は受付済みで押せない');
+      assert.match(await ph.locator('#joinlist button', { hasText: LOTTERY[0] }).innerText(), /受付済み/);
+      await shot(ph, 'join-list');
+      await ph.fill('#joinsearch', who.name.slice(0, 2));
+      assert.equal(await ph.locator('#joinlist button').count() >= 1, true);
+      await ph.locator('#joinlist button', { hasText: who.name }).click();
+      await ph.locator('#confirm').waitFor({ state: 'visible' });
+      assert.equal(await text(ph, '#confirmname'), who.name + ' さん');
+      await shot(ph, 'join-confirm');
+      await ph.click('#confirmyes');
+      await ph.waitForFunction(() => !document.getElementById('intro').hidden || !document.getElementById('result').hidden);
+      if (await ph.locator('#intro').isVisible()) {
+        assert.equal(await text(ph, '#name'), who.name + ' さん');
+        await ph.click('#draw');
+      }
+      await ph.locator('#resulthint').waitFor({ state: 'visible' });
+      const seat = state().people.find(p => p.id === who.id).seat;
+      assert.ok(seat >= 1);
+      assert.equal((await text(ph, '#number')).replace(/\s/g, ''), seat + '番');
+      await ph.locator('#drinklist button', { hasText: /^レモンサワー$/ }).click();
+      await ph.locator('#drinkmsg').filter({ hasText: '「レモンサワー」で登録しました' }).waitFor();
+      assert.equal(sheetRow(who.token).drink, 'レモンサワー');
+      assert.ok(state().people.find(p => p.id === who.id).claimedAt);
+      assert.equal(await ph.locator('#switchperson').isVisible(), true);
+      await shot(ph, 'join-result');
+      // 同じスマホで読み直すと、名前選びを飛ばしてそのまま戻る
+      await ph.reload();
+      await ph.locator('#resulthint').waitFor({ state: 'visible' });
+      assert.equal(await ph.locator('#join').isHidden(), true);
+
+      // 2台目のスマホ：受付済みなので選べない
+      const ph2 = await newPage(browser, 'join-phone2', { width: 390, height: 844 });
+      await open(ph2, { j: code });
+      await ph2.locator('#join').waitFor({ state: 'visible' });
+      assert.equal(await ph2.locator('#joinlist button', { hasText: who.name }).isDisabled(), true);
+      // 画面を開いたまま他のスマホが先に受付した場合 → 選ぶとエラーで一覧に戻る
+      const other = state().people.find(p => !p.claimedAt);
+      if (other) {
+        callServer(ctx, 'joinClaim', [code, other.id]);
+        await ph2.locator('#joinlist button', { hasText: other.name }).click();
+        await ph2.click('#confirmyes');
+        await ph2.locator('#joinerr').filter({ hasText: 'すでに受付済み' }).waitFor();
+        assert.equal(await ph2.locator('#joinlist button', { hasText: other.name }).isDisabled(), true);
+      }
+      // 幹事が「受付をやり直す」→ 2台目から選べる。1台目は取り消しを知らせて一覧に戻る
+      await admin.click('#tab-setup');
+      await admin.locator('#roster tr', { hasText: who.name }).getByRole('button', { name: /修正/ }).click();
+      await admin.locator('#editdialog[open]').waitFor();
+      await admin.locator('#releasewrap').waitFor({ state: 'visible' }); // 開いたときに最新の状態を読み直して表示される
+      await admin.check('#editrelease');
+      await admin.click('#editform button[type=submit]');
+      await waitStatus(admin, /修正しました/);
+      assert.equal(state().people.find(p => p.id === who.id).claimedAt, null);
+      // 1台目は取り消されたことを知らせて、名前の一覧に戻る
+      await ph.reload();
+      await ph.locator('#joinerr').filter({ hasText: '取り消されました' }).waitFor();
+      await ph2.reload();
+      await ph2.locator('#joinlist button', { hasText: who.name }).click();
+      await ph2.click('#confirmyes');
+      await ph2.locator('#resulthint').waitFor({ state: 'visible' });
+      assert.equal((await text(ph2, '#number')).replace(/\s/g, ''), seat + '番', '席は変わらない');
+      // 「ほかの方の受付をする」で一覧に戻る
+      await ph2.click('#switchperson');
+      await ph2.locator('#join').waitFor({ state: 'visible' });
+      // 共通QRを作り直すと古いQRは使えない
+      await admin.click('#tab-qr');
+      await admin.click('#joinreset');
+      await admin.click('#askyes');
+      await waitStatus(admin, /共通QRコードを作り直しました/);
+      assert.notEqual(await admin.inputValue('#joinlink'), joinUrl);
+      await ph2.reload();
+      await ph2.locator('#bad').waitFor({ state: 'visible' });
+      assert.match(await text(ph2, '#badmsg'), /QRコードが無効/);
+      await noHScroll(ph2, 'join phone');
+      await ph.context().close(); await ph2.context().close();
     });
 
     await step('ページのエラー・コンソールエラーなし', async () => {

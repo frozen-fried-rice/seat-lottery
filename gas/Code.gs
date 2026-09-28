@@ -6,7 +6,7 @@
  */
 
 const SHEET_PEOPLE_ = '参加者', SHEET_SETTINGS_ = '設定';
-const HEADERS_ = ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時'];
+const HEADERS_ = ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時'];
 const COL_SEAT_ = 5; // 席番号の列（ここだけ数値。ほかの列は書式なしテキスト）
 const DEFAULT_DRINKS_ = ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'];
 const DEFAULT_SEATS_ = 27, MAX_SEATS_ = 99, MAX_PEOPLE_ = 200, MAX_NAME_ = 60, MAX_DRINK_ = 30, MAX_DRINKS_ = 20, MAX_EVENT_ = 40, MAX_URL_ = 300;
@@ -17,6 +17,8 @@ const ERR_NOSEAT_ = '空いている席がありません。受付にお声が�
 const ERR_FIXED_ = '固定席の方はくじを引きません。';
 const ERR_CLOSED_ = 'ドリンクの受付は締め切りました。受付にお声がけください。';
 const ERR_PERSON_ = '該当する方が見つかりません。画面を更新してから、もう一度お試しください。';
+const ERR_JOIN_ = 'QRコードが無効です。受付にお声がけください。';
+const ERR_JOIN_CLOSED_ = '共通QRコードでの受付は、いまは停止しています。受付にお声がけください。';
 
 /* ================= 画面の振り分け ================= */
 
@@ -25,7 +27,7 @@ function doGet(e) {
   let out;
   if (typeof p.admin === 'string' && p.admin && isAdminKey_(p.admin)) {
     out = HtmlService.createHtmlOutputFromFile('Admin').setTitle('席くじ 幹事画面');
-  } else if (typeof p.t === 'string' && p.t) {
+  } else if ((typeof p.t === 'string' && p.t) || (typeof p.j === 'string' && p.j)) {
     out = HtmlService.createHtmlOutputFromFile('Participant').setTitle('席くじ');
   } else {
     out = HtmlService.createHtmlOutput(infoPage_()).setTitle('席くじ');
@@ -62,7 +64,9 @@ function participantDraw(token) {
   return withLock_(function () {
     const db = load_(true);
     const p = findByToken_(db, token);
-    if (drawFor_(db, p)) saveRow_(db, p);
+    let changed = drawFor_(db, p);
+    if (!p.claimedAt) { p.claimedAt = now_(); changed = true; } // 個別QRで使い始めた方は、共通QRの名前一覧でも「受付済み」にします
+    if (changed) saveRow_(db, p);
     return participantView_(db, p);
   });
 }
@@ -79,8 +83,40 @@ function participantSetDrink(token, drink) {
     if (!db.settings.drinkOpen) throw new Error(ERR_CLOSED_);
     p.drink = d;
     p.drinkAt = now_();
+    if (!p.claimedAt) p.claimedAt = p.drinkAt;
     saveRow_(db, p);
     return participantView_(db, p);
+  });
+}
+
+/* ================= 共通QR（全員同じQR）用 API ================= */
+/*
+ * 共通QRは「WebアプリのURL?j=<共通コード>」です。読み取った方は名簿から自分の名前を選び、
+ * 選んだ時点でその方の個別トークンを受け取ります（以降は個別QRと同じ participant* を使います）。
+ * なりすましを防ぐため、一度選ばれた名前（受付済み）は別のスマホからは選べません。幹事が「受付をやり直す」で戻せます。
+ */
+
+function joinList(code) {
+  const db = load_();
+  checkJoin_(db, code);
+  return {
+    event: db.settings.event,
+    people: db.people.map(function (p) { return { id: p.id, name: p.name, claimed: !!p.claimedAt }; })
+  };
+}
+
+function joinClaim(code, id) {
+  const pre = load_();
+  checkJoin_(pre, code);
+  if (findById_(pre, id).claimedAt) throw new Error(claimedMsg_(findById_(pre, id)));
+  return withLock_(function () {
+    const db = load_(true);
+    checkJoin_(db, code);
+    const p = findById_(db, id);
+    if (p.claimedAt) throw new Error(claimedMsg_(p));
+    p.claimedAt = now_();
+    saveRow_(db, p);
+    return { token: p.token, view: participantView_(db, p) };
   });
 }
 
@@ -89,7 +125,8 @@ function participantSetDrink(token, drink) {
 function adminGetState(key) {
   checkKey_(key);
   let db = load_();
-  if (db.dirty) db = withLock_(function () { const d = load_(true); save_(d); return d; });
+  // 読み込み時に直した箇所がある・共通QRコードがまだ無い（以前の版から更新した）ときは、ここで書き込んでおきます
+  if (db.dirty || !db.settings.joinCode) db = withLock_(function () { const d = load_(true); save_(d); if (!d.settings.joinCode) saveSettings_(d); return d; });
   return adminState_(db);
 }
 
@@ -135,6 +172,8 @@ function adminUpdatePerson(key, id, patch) {
       else { p.drink = checkDrink_(patch.drink); p.drinkAt = now_(); }
     }
     if (patch.clearSeat === true) { p.seat = null; p.drawnAt = null; }
+    // 受付をやり直すときは、名前を選んだスマホ（間違えて選んだ人のスマホを含む）が使えなくなるよう合言葉も新しくします
+    if (patch.releaseClaim === true) { p.claimedAt = null; p.token = newToken_(db); }
     save_(db);
     return adminState_(db);
   });
@@ -205,6 +244,10 @@ function adminSaveSettings(key, s) {
       st.drinkOpen = s.drinkOpen;
     }
     if (s.baseUrl !== undefined) st.baseUrl = checkBaseUrl_(s.baseUrl);
+    if (s.joinOpen !== undefined) {
+      if (typeof s.joinOpen !== 'boolean') throw new Error('共通QRコードの設定が正しくありません。');
+      st.joinOpen = s.joinOpen;
+    }
     saveSettings_(db);
     SpreadsheetApp.flush();
     return adminState_(db);
@@ -217,7 +260,20 @@ function adminReissueToken(key, id) {
     const db = load_(true);
     const p = findById_(db, id);
     p.token = newToken_(db);
+    p.claimedAt = null; // 古いスマホは使えなくなるので、共通QRから選び直せるようにします
     save_(db);
+    return adminState_(db);
+  });
+}
+
+/* 共通QRコードを作り直します（古い共通QRは使えなくなります。受付済みの方のスマホはそのまま使えます）。 */
+function adminResetJoinCode(key) {
+  checkKey_(key);
+  return withLock_(function () {
+    const db = load_(true);
+    db.settings.joinCode = randomString_(12);
+    saveSettings_(db);
+    SpreadsheetApp.flush();
     return adminState_(db);
   });
 }
@@ -229,7 +285,7 @@ function adminReset(key, scope) {
     const db = load_(true);
     if (scope === 'all') db.people = [];
     db.people.forEach(function (p) {
-      if (scope === 'seats') { p.seat = null; p.drawnAt = null; }
+      if (scope === 'seats') { p.seat = null; p.drawnAt = null; p.claimedAt = null; }
       if (scope === 'drinks') { p.drink = null; p.drinkAt = null; }
     });
     save_(db);
@@ -355,6 +411,12 @@ function isAdminKey_(key) {
 }
 function checkKey_(key) { if (!isAdminKey_(key)) throw new Error(ERR_KEY_); }
 function checkKind_(kind) { if (kind !== 'lottery' && kind !== 'fixed') throw new Error('区分は「抽選」か「固定」を選んでください。'); }
+function checkJoin_(db, code) {
+  const c = db.settings.joinCode;
+  if (typeof code !== 'string' || !/^[A-Za-z0-9]{8,64}$/.test(code) || !c || code !== c) throw new Error(ERR_JOIN_);
+  if (!db.settings.joinOpen) throw new Error(ERR_JOIN_CLOSED_);
+}
+function claimedMsg_(p) { return '「' + p.name + '」さんは、すでに受付済みです。ご本人の場合は、最初に使ったスマホで同じQRコードを読み取るか、受付にお声がけください。'; }
 function checkTokenShape_(token) { if (typeof token !== 'string' || !/^[A-Za-z0-9]{8,64}$/.test(token)) throw new Error(ERR_TOKEN_); }
 
 function checkName_(db, name, exceptId) {
@@ -425,6 +487,7 @@ function writeHeaders_(sh) {
 function ensurePeopleSheet_(ss) {
   let sh = ss.getSheetByName(SHEET_PEOPLE_);
   if (!sh) { sh = ss.insertSheet(SHEET_PEOPLE_); writeHeaders_(sh); }
+  else if (sh.getLastRow() >= 1 && String(sh.getRange(1, HEADERS_.length).getValue()) !== HEADERS_[HEADERS_.length - 1]) writeHeaders_(sh); // 以前の版（列が少ない）から見出しを足します
   return sh;
 }
 
@@ -433,7 +496,7 @@ function ensureSettingsSheet_(ss) {
   const fresh = !sh;
   if (!sh) sh = ss.insertSheet(SHEET_SETTINGS_);
   const rows = readKeyValues_(sh);
-  const defaults = { seats: String(DEFAULT_SEATS_), event: '', drinks: DEFAULT_DRINKS_.join('\n'), drinkOpen: 'TRUE', baseUrl: '' };
+  const defaults = { seats: String(DEFAULT_SEATS_), event: '', drinks: DEFAULT_DRINKS_.join('\n'), drinkOpen: 'TRUE', baseUrl: '', joinCode: randomString_(12), joinOpen: 'TRUE' };
   let changed = fresh;
   Object.keys(defaults).forEach(function (k) {
     if (!rows.some(function (r) { return r[0] === k; })) { rows.push([k, defaults[k]]); changed = true; }
@@ -470,12 +533,15 @@ function parseSettings_(rows) {
   drinksRaw.split(/\r?\n/).forEach(function (x) { const d = clean_(x); if (d && d.length <= MAX_DRINK_ && drinks.indexOf(d) < 0 && drinks.length < MAX_DRINKS_) drinks.push(d); });
   const open = m.drinkOpen;
   const url = m.baseUrl === undefined || m.baseUrl === null ? '' : String(m.baseUrl).trim();
+  const join = m.joinCode === undefined || m.joinCode === null ? '' : String(m.joinCode).trim();
   return {
     seats: Number.isInteger(seats) && seats >= 1 && seats <= MAX_SEATS_ ? seats : DEFAULT_SEATS_,
     event: m.event === undefined || m.event === null ? '' : tidy_(m.event).slice(0, MAX_EVENT_),
     drinks: drinks,
     drinkOpen: !(open === false || String(open).trim().toUpperCase() === 'FALSE'),
     baseUrl: /^https:\/\//.test(url) ? url : '',
+    joinCode: /^[A-Za-z0-9]{8,64}$/.test(join) ? join : '',
+    joinOpen: !(m.joinOpen === false || String(m.joinOpen).trim().toUpperCase() === 'FALSE'),
     rows: rows
   };
 }
@@ -488,7 +554,9 @@ function readSettingsOnly_() {
 
 function saveSettings_(db) {
   const st = db.settings;
-  const vals = { seats: String(st.seats), event: st.event, drinks: st.drinks.join('\n'), drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl };
+  const vals = { seats: String(st.seats), event: st.event, drinks: st.drinks.join('\n'), drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl,
+    joinCode: st.joinCode || randomString_(12), joinOpen: st.joinOpen ? 'TRUE' : 'FALSE' };
+  st.joinCode = vals.joinCode;
   const rows = st.rows.map(function (r) { return [r[0], has_(vals, r[0]) ? vals[r[0]] : r[1]]; });
   Object.keys(vals).forEach(function (k) { if (!rows.some(function (r) { return r[0] === k; })) rows.push([k, vals[k]]); });
   st.rows = rows;
@@ -525,7 +593,7 @@ function load_(locked) {
       const kind = cellText_(r[3]) === '固定' || cellText_(r[3]) === 'fixed' ? 'fixed' : 'lottery';
       let seat = r[4] === '' || r[4] === null ? NaN : Number(String(r[4]).trim());
       seat = kind === 'lottery' && Number.isInteger(seat) && seat >= 1 ? seat : null;
-      const p = { id: id, token: token, name: tidy_(name), kind: kind, seat: seat, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]), row: i + 2 };
+      const p = { id: id, token: token, name: tidy_(name), kind: kind, seat: seat, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]), claimedAt: cellText_(r[8]), row: i + 2 };
       if (!p.id || ids[p.id]) { p.id = null; db.dirty = true; }
       if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokens[p.token]) { p.token = null; db.dirty = true; }
       if (p.id) ids[p.id] = true;
@@ -549,7 +617,7 @@ function load_(locked) {
 }
 
 function rowValues_(p) {
-  return [p.id, p.token, p.name, p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, p.drink || '', p.drawnAt || '', p.drinkAt || ''];
+  return [p.id, p.token, p.name, p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, p.drink || '', p.drawnAt || '', p.drinkAt || '', p.claimedAt || ''];
 }
 
 /* 全員分を書き込みます。先に全体を消さず上書きし、行が減った分だけ消します（同時に読んでいる実行が空の名簿を見ないように）。 */
@@ -590,7 +658,7 @@ function newToken_(db) {
 }
 
 function newPerson_(db, name, kind) {
-  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, row: 0 };
+  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, row: 0 };
 }
 
 function findByToken_(db, token) {
@@ -685,9 +753,10 @@ function adminState_(db) {
   const st = db.settings, labels = fixedLabels_(db);
   return {
     settings: { seats: st.seats, event: st.event, drinks: st.drinks.slice(), drinkOpen: st.drinkOpen, baseUrl: st.baseUrl, appUrl: appUrl_(st),
+      joinOpen: st.joinOpen, joinUrl: appUrl_(st) && st.joinCode ? appUrl_(st) + '?j=' + st.joinCode : '',
       devUrl: !st.baseUrl && isDevUrl_(rawServiceUrl_()) /* 自動で取れた URL がテスト用（/dev）だった */ },
     people: db.people.map(function (p) {
-      return { id: p.id, token: p.token, name: p.name, kind: p.kind, seat: p.seat, drink: p.drink, drawnAt: p.drawnAt, drinkAt: p.drinkAt, fixedLabel: labels[p.id] || null };
+      return { id: p.id, token: p.token, name: p.name, kind: p.kind, seat: p.seat, drink: p.drink, drawnAt: p.drawnAt, drinkAt: p.drinkAt, claimedAt: p.claimedAt, fixedLabel: labels[p.id] || null };
     }),
     summary: summary_(db),
     updatedAt: now_()
