@@ -1518,5 +1518,43 @@ test('回帰4: 「=」「+」「-」「@」で始まる名前・ドリンク・�
   assert.deepEqual(st.settings.drinks, ['=A1', 'ビール']);
 });
 
+
+const duringSave = (ctx, code) => ctx.__mock.run(`(function(){ const o = save_; save_ = function(db){ save_ = o; (function(){ ${code} })(); return o(db); }; })()`);
+test('回帰4: 保存中に手で行を差し込まれたら、書かずに「混み合っています」。やり直すと正しく保存される（IDの無い手入力の行でも）', () => {
+  const { ctx, admin } = fresh();
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(2, 3, 2, 1).setValues([['山田'], ['鈴木']]);
+  duringSave(ctx, `const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('参加者'); sh.insertRowsAfter(1, 1); sh.getRange(2, 3).setValue('佐藤');`);
+  throwsMsg(() => admin('adminGetState'), /混み合って/);
+  const names = admin('adminGetState').people.map(p => p.name);
+  assert.deepEqual(names, ['佐藤', '山田', '鈴木']);
+});
+
+test('回帰4: 削除の保存中に行がずれたら、別の方の行を消さない', () => {
+  const { ctx, add, admin, byName } = fresh();
+  add(['A', 'B', 'C']);
+  const c = byName('C');
+  duringSave(ctx, `const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('参加者'); sh.insertRowsAfter(3, 1); sh.getRange(4, 3).setValue('E');`);
+  throwsMsg(() => admin('adminDeletePerson', c.id), /混み合って/);
+  assert.deepEqual(admin('adminGetState').people.map(p => p.name), ['A', 'B', 'E', 'C']);
+  admin('adminDeletePerson', c.id);
+  assert.deepEqual(admin('adminGetState').people.map(p => p.name), ['A', 'B', 'E']);
+});
+
+test('回帰4: 以前の版（8列）で見出しの無いメモがI列にあっても、受付の記録と取り違えない', () => {
+  const { ctx, add, admin, call, byName } = fresh();
+  add(['山田']);
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(1, 9, 1, 2).setValues([['', '']]);
+  sh.getRange(2, 9).setValue('ベジタリアン');
+  const set = ctx.__mock.sheet('設定'), vr = set._dump().findIndex(r => r[0] === 'sheetVersion') + 1;
+  set.getRange(vr, 1, 1, 2).setValues([['', '']]);
+  add(['鈴木']);
+  assert.equal(byName('山田').claimedAt, null);
+  assert.equal(ctx.__mock.values('参加者')[1][10], 'ベジタリアン', 'メモは右へ移って残る');
+  const code = joinCodeOf(admin('adminGetState'));
+  assert.equal(call('joinClaim', code, byName('山田').id).view.name, '山田');
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -585,7 +585,10 @@ function ensurePeopleSheet_(ss) {
       // 列を差し込んで右へずらしてから見出しを書きます。今の版で見出しが書き換えられただけなら、見出しを書き直すだけです
       if (!settingsHas_(ss, 'sheetVersion')) {
         for (let c = 8; c < HEADERS_.length; c++) {
-          if (head[c] !== '' && head[c] !== HEADERS_[c]) { sh.insertColumnBefore(c + 1); head.splice(c, 0, ''); }
+          if (head[c] === HEADERS_[c]) continue;
+          // 見出しが無くても、その列に何か書いてあれば（見出しの無いメモなど）列を差し込みます
+          const used = head[c] !== '' || sh.getRange(1, c + 1, sh.getLastRow(), 1).getValues().some(function (x) { return x[0] !== '' && x[0] !== null; });
+          if (used) { sh.insertColumnBefore(c + 1); head.splice(c, 0, ''); }
         }
       }
       writeHeaders_(sh);
@@ -720,7 +723,7 @@ function load_(locked) {
   else { settingsSheet = ss.getSheetByName(SHEET_SETTINGS_); rows = settingsSheet ? readKeyValues_(settingsSheet) : []; }
   const settings = parseSettings_(rows);
   const W = HEADERS_.length;
-  const db = { sheet: sheet, settingsSheet: settingsSheet, settings: settings, people: [], ghosts: [], loadedRows: [], dirty: false };
+  const db = { sheet: sheet, settingsSheet: settingsSheet, settings: settings, people: [], ghosts: [], loadedRows: [], loadedRaw: Object.create(null), dirty: false };
   const last = sheet ? sheet.getLastRow() : 0;
   if (last >= 2) {
     // A〜J列だけを読みます。右側に幹事が足した列（メモ・数式など）は読み書きしません（行を消すときは行ごと消すので一緒に動きます）
@@ -730,6 +733,7 @@ function load_(locked) {
       if (!r.some(function (c) { return c !== '' && c !== null; })) return; // A〜Jが空の行はそのまま（右側にメモがあるかもしれないので消しません）
       const row = i + 2, name = cellText_(r[2]) ? tidy_(cellText_(r[2])) : '';
       db.loadedRows.push(row);
+      db.loadedRaw[row] = rowText_(r); // 書き込む前に、この行が読み込んだときのままかを確かめるため
       if (!name) {
         // お名前だけ消えている行（打ち直しの途中など）は、その場所にそのまま残します。席も使用中として扱います
         db.ghosts.push({ raw: r.slice(0, W), seat: seatOf_(r[4]), row: row, origId: cellText_(r[0]) });
@@ -803,14 +807,20 @@ function ghostValues_(g) {
  * スクリプトのロックの外で幹事がシートの行を消した・並べ替えた直後だと、別の方の行に書いてしまうためです。
  * ずれていたら「混み合っています」として書かずに終わります（参加者の画面は自動でやり直します）。
  */
+function rowText_(r) {
+  const out = [];
+  for (let c = 0; c < HEADERS_.length; c++) out.push(cellText_(r[c]) || '');
+  return out.join('\t');
+}
+
+/* 読み込んだ行（消す予定の行も含む）が、A〜J列とも読み込んだときのままかを確かめます */
 function verifyRows_(db) {
-  const rows = db.people.filter(function (p) { return p.row && !p.isNew; }).map(function (p) { return [p.row, p.origId]; })
-    .concat(db.ghosts.map(function (g) { return [g.row, g.origId]; }));
+  const rows = db.loadedRows;
   if (!rows.length) return;
-  const max = rows.reduce(function (m, x) { return x[0] > m ? x[0] : m; }, 2);
+  const max = rows.reduce(function (m, r) { return r > m ? r : m; }, 2);
   if (max > db.sheet.getMaxRows()) throw appErr_(ERR_BUSY_);
-  const col = db.sheet.getRange(2, 1, max - 1, 1).getValues();
-  rows.forEach(function (x) { if (cellText_(col[x[0] - 2][0]) !== (x[1] || null)) throw appErr_(ERR_BUSY_); });
+  const vals = db.sheet.getRange(2, 1, max - 1, HEADERS_.length).getValues();
+  rows.forEach(function (r) { if (rowText_(vals[r - 2]) !== db.loadedRaw[r]) throw appErr_(ERR_BUSY_); });
 }
 
 function save_(db) {
@@ -852,6 +862,12 @@ function save_(db) {
       };
     }
     newcomers.forEach(function (p) { while (busyRow(next)) next++; p.row = next++; });
+    // 新しい方を入れる行が、書き込む直前も空のままかを確かめます（その間に手で書き足された行を上書きしないように）
+    const first = newcomers[0].row, lastNew = newcomers[newcomers.length - 1].row, lr = sh.getLastRow();
+    if (first <= lr) {
+      const v = sh.getRange(first, 1, Math.min(lastNew, lr) - first + 1, W).getValues();
+      if (v.some(function (r) { return rowText_(r).replace(/\t/g, '') !== ''; })) throw appErr_(ERR_BUSY_);
+    }
   }
   const byRow = Object.create(null);
   let maxRow = 1;
@@ -874,6 +890,8 @@ function save_(db) {
     r = e + 1;
   }
   db.loadedRows = Object.keys(byRow).map(Number);
+  db.loadedRaw = Object.create(null);
+  db.loadedRows.forEach(function (r) { db.loadedRaw[r] = rowText_(byRow[r]); });
   db.people.forEach(function (p) { delete p.tempId; delete p.isNew; p.origId = p.id; });
   db.ghosts.forEach(function (g) { g.origId = cellText_(g.raw[0]); });
   db.dirty = false;
@@ -883,11 +901,13 @@ function save_(db) {
 /* 1人分の行だけを書き込みます（参加者の抽選・ドリンク登録用）。読み込み時に直した箇所があれば全体を書き込みます。 */
 function saveRow_(db, p) {
   if (db.dirty || !p.row) { save_(db); return; }
-  if (cellText_(db.sheet.getRange(p.row, 1).getValue()) !== (p.origId || null)) throw appErr_(ERR_BUSY_); // 行がずれていたら書かない（上の verifyRows_ と同じ理由）
+  // 行がずれていたら書かない（上の verifyRows_ と同じ理由）
+  if (p.row > db.sheet.getMaxRows() || rowText_(db.sheet.getRange(p.row, 1, 1, HEADERS_.length).getValues()[0]) !== db.loadedRaw[p.row]) throw appErr_(ERR_BUSY_);
   const range = db.sheet.getRange(p.row, 1, 1, HEADERS_.length);
   range.setNumberFormat('@');
   db.sheet.getRange(p.row, COL_SEAT_).setNumberFormat('0');
   range.setValues([rowValues_(p)]);
+  db.loadedRaw[p.row] = rowText_(rowValues_(p));
   SpreadsheetApp.flush();
 }
 
