@@ -314,7 +314,11 @@ function adminReset(key, scope) {
   if (scope !== 'seats' && scope !== 'drinks' && scope !== 'all') throw new Error('リセットする範囲が正しくありません。');
   return withLock_(function () {
     const db = load_(true);
-    if (scope === 'all') { db.people = []; db.ghosts = []; }
+    if (scope === 'all') {
+      db.people = []; db.ghosts = [];
+      db.settings.joinCode = randomString_(12); // 前の会の共通QR（ポスター・送ったリンク）で、次の会の名簿を選べないように作り直します
+      saveSettings_(db);
+    }
     if (scope === 'seats') db.ghosts.forEach(function (g) { g.seat = null; });
     db.people.forEach(function (p) {
       if (scope === 'seats') { p.seat = null; p.drawnAt = null; }

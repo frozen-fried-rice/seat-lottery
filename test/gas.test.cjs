@@ -1329,5 +1329,18 @@ test('回帰2: お名前の無い行の席より少ない席数にはできな�
   throwsMsg(() => admin('adminSaveSettings', { seats: 5 }), /9番/);
 });
 
+
+test('回帰2: 名簿ごと消す と共通QRも新しくなり、前の会の共通QRは使えない', () => {
+  const { add, admin, call } = fresh();
+  add(['A']);
+  const code = joinCodeOf(admin('adminGetState'));
+  const st = admin('adminReset', 'all');
+  const code2 = joinCodeOf(st);
+  assert.notEqual(code2, code);
+  add(['次の会の人']);
+  throwsMsg(() => call('joinList', code), /QRコードが無効/);
+  assert.deepEqual(call('joinList', code2).people.map(p => p.name), ['次の会の人']);
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

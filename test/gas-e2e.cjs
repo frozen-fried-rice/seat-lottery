@@ -722,6 +722,64 @@ async function step(name, fn) {
       await pg.context().close();
     });
 
+    await step('11) 第2回の回帰：受付済みの自分を押すと読み込み表示・保存後のフォーカス・取り消し後の絞り込み・QR画面の状態更新・確認中の削除', async () => {
+      callServer(ctx, 'adminAddPeople', [KEY, ['回帰 春子', '回帰 夏子'], 'lottery']);
+      const code = state().settings.joinUrl.split('?j=')[1];
+      const pg = await newPage(browser, 'r2p', { width: 390, height: 844 });
+      await open(pg, { j: code });
+      await pg.locator('#join').waitFor({ state: 'visible' });
+      await pg.fill('#joinsearch', '春子');
+      await pg.locator('#joinlist button', { hasText: '回帰 春子' }).click();
+      await pg.waitForTimeout(600);
+      await pg.click('#confirmyes');
+      await pg.locator('#intro').waitFor({ state: 'visible' });
+      await pg.click('#switchperson');
+      await pg.locator('#join').waitFor({ state: 'visible' });
+      // (a) 自分（このスマホで受付済み）を押すと、すぐ読み込み表示になり、ほかの名前は押せない
+      faults.push({ label: 'r2p', name: 'joinClaim', mode: 'delay', ms: 1200 });
+      await pg.locator('#joinlist button', { hasText: '回帰 春子' }).click();
+      assert.equal(await pg.locator('#loading').isVisible(), true);
+      await pg.locator('#intro').waitFor({ state: 'visible' });
+      assert.equal(await text(pg, '#name'), '回帰 春子 さん');
+      // (b) ドリンクを保存したあとも、押したボタンにフォーカスが残る
+      await pg.click('#draw');
+      await pg.locator('#resulthint').waitFor({ state: 'visible' });
+      await pg.locator('#drinklist button', { hasText: /^ビール$/ }).focus();
+      await pg.keyboard.press('Enter');
+      await pg.locator('#drinkmsg.ok').waitFor();
+      assert.equal(await pg.evaluate(() => document.activeElement.textContent), 'ビール');
+      // (c) 受付を取り消されて一覧に戻ったとき、前の方の絞り込みは消えている
+      const id = state().people.find(p => p.name === '回帰 春子').id;
+      callServer(ctx, 'adminUpdatePerson', [KEY, id, { releaseClaim: true }]);
+      await pg.locator('#drinklist button', { hasText: /^コーラ$/ }).click();
+      await pg.locator('#joinerr').filter({ hasText: '取り消されました' }).waitFor();
+      assert.equal(await pg.inputValue('#joinsearch'), '');
+      assert.ok((await pg.locator('#joinlist button').count()) > 2);
+      await pg.context().close();
+
+      // 幹事画面
+      const ad = await newPage(browser, 'r2a', { width: 1280, height: 900 });
+      await open(ad, { admin: KEY });
+      await ad.locator('#view-drinks').waitFor({ state: 'visible' });
+      await ad.click('#tab-qr');
+      // (d) QR画面を開いた直後に届いた最新の状態で「状態／ドリンク」も更新される
+      const nk = state().people.find(p => p.name === '回帰 夏子');
+      callServer(ctx, 'participantDraw', [nk.token]);
+      callServer(ctx, 'participantSetDrink', [nk.token, 'ハイボール']);
+      await ad.locator('#qrrows tr', { hasText: '回帰 夏子' }).getByRole('button', { name: /QRコードを表示/ }).click();
+      await ad.locator('#qrsub').filter({ hasText: 'ハイボール' }).waitFor();
+      assert.match(await text(ad, '#qrsub'), /受付済み/);
+      // (e) 「QRを作り直す」の確認中にほかの端末で削除 → 確認画面も閉じ、何も送らない
+      await ad.click('#qrreissue');
+      await ad.locator('#askdialog[open]').waitFor();
+      callServer(ctx, 'adminDeletePerson', [KEY, nk.id]);
+      await ad.evaluate(() => refresh(false));
+      await ad.locator('#askdialog').waitFor({ state: 'hidden' });
+      assert.equal(await ad.locator('#qrdialog').isVisible(), false);
+      assert.equal(await ad.locator('#error').isVisible(), false, 'エラーを出さない');
+      await ad.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });

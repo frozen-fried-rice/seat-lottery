@@ -309,6 +309,7 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
  <select id="editdrink"></select>
  <div id="editotherwrap" hidden><label for="editother">ドリンク名（30文字まで）</label><input id="editother" maxlength="30" autocomplete="off" placeholder="例：ジンジャーエール"></div>
  <label class="check" id="clearseatwrap" style="margin-top:12px"><input type="checkbox" id="editclearseat"> <span id="clearseatlabel">席を空きに戻す</span></label>
+ <p class="hint" id="editclaim" style="margin:10px 0 0"></p>
  <label class="check" id="releasewrap" style="margin-top:8px"><input type="checkbox" id="editrelease"> <span>受付をやり直す（選んだスマホでの受付を取り消し、共通QRでお名前を選び直せるようにします。この方の個別QRも作り直しになります）</span></label>
  <p id="editerror" class="modalerror" role="alert" hidden></p>
  <div class="dialog-actions"><button type="button" class="danger" id="editdelete">名簿から削除</button><span class="spacer"></span><button type="button" id="editcancel" data-free="1">キャンセル</button><button type="submit" class="primary">保存</button></div>
@@ -504,8 +505,8 @@ function isState(o){return !!o&&typeof o==='object'&&!!o.settings&&Array.isArray
 function applyState(st,n){
  if(!isState(st)||n<applied)return false;
  applied=n;S=st;lastLoad=Date.now();
- if(qrId&&!person(qrId)&&$('qrdialog').open)$('qrdialog').close();
- if(editing&&!person(editing.id)&&$('editdialog').open){const nm=editing.name;$('editdialog').close();ok(nm+'さんは名簿から削除されていたため、修正の画面を閉じました。');}
+ if(qrId&&!person(qrId)&&$('qrdialog').open){if($('askdialog').open)$('askdialog').close();$('qrdialog').close();}
+ if(editing&&!person(editing.id)&&$('editdialog').open){const nm=editing.name;if($('askdialog').open)$('askdialog').close();$('editdialog').close();ok(nm+'さんは名簿から削除されていたため、修正の画面を閉じました。');}
  return true;
 }
 /* ボタン操作から呼ぶ。通信中は操作を止め、成功したら状態を反映する */
@@ -633,7 +634,13 @@ function render(){
  renderDrinks();renderQr();renderSetup();renderUpdated();
  // 修正ダイアログを開いている間に最新の状態が届いたら、受付済み・席の表示を合わせます（入力中の内容はそのまま）
  if(editing&&$('editdialog').open){const p=person(editing.id);if(p)fillEdit(p);}
- if(qrId&&$('qrdialog').open){const p=person(qrId);if(p&&linkFor(p)!==$('qrlink').value)fillQr(p);} // 別の端末でQRが作り直されたとき
+ if(qrId&&$('qrdialog').open){
+  const p=person(qrId);
+  if(p){
+   $('qrtitle').textContent=p.name+' さん';$('qrsub').textContent=qrSubText(p);
+   if(linkFor(p)!==$('qrlink').value)fillQr(p); // 別の端末でQRが作り直されたとき
+  }
+ }
  restoreFocus();
  lockUi();
 }
@@ -679,7 +686,7 @@ function renderJoin(){
  const box=$('joinqr'),svg=url?qrSvgCached(url):null;
  box.replaceChildren();
  if(svg)box.innerHTML=svg;else box.append(el('p',{class:'emptynote',text:url?'QRコードに収まりません。QR用のURLを短くしてください。':'QRに使うURLがありません。先にWebアプリとしてデプロイしてください。'}));
- if(document.activeElement!==$('joinlink'))$('joinlink').value=url;
+ if($('joinlink').value!==url)$('joinlink').value=url;
  $('joinprint').disabled=!svg;$('joincopy').disabled=!url;
  if(url){$('joinopenlink').href=url;$('joinopenlink').removeAttribute('aria-disabled');}else{$('joinopenlink').removeAttribute('href');$('joinopenlink').setAttribute('aria-disabled','true');}
 }
@@ -782,7 +789,7 @@ async function reset(scope,title,msg,done){
 }
 $('resetseats').onclick=()=>reset('seats','席だけ消す','全員の席と抽選日時を消して、未抽選に戻します。名簿・ドリンク・受付済みの記録はそのままです（受付をやり直すときは、各自の「修正」から）。元に戻せません。','席を消しました。');
 $('resetdrinks').onclick=()=>reset('drinks','ドリンクだけ消す','全員のドリンクと登録日時を消します。名簿と席はそのままです。元に戻せません。','ドリンクを消しました。');
-$('resetall').onclick=()=>reset('all','名簿ごと消す','名簿・席・ドリンクをすべて消します（設定は残ります）。配ったQRコードも使えなくなります。元に戻せません。','名簿ごと消しました。');
+$('resetall').onclick=()=>reset('all','名簿ごと消す','名簿・席・ドリンクをすべて消します（設定は残ります）。配ったQRコード（個別QR・共通QR）も使えなくなり、共通QRは新しくなります。元に戻せません。','名簿ごと消しました。');
 
 async function drawOne(id){
  const p=person(id);if(!p)return;
@@ -821,10 +828,15 @@ function fillEdit(p){
  if(!t('editkind'))$('editkind').value=p.kind;
  const menu=S.settings.drinks||[],sel=$('editdrink'),d=p.drink;
  if(!t('editdrink')&&!t('editother')){
-  sel.replaceChildren(el('option',{value:'',text:'未登録'}),...menu.map(x=>el('option',{value:'m:'+x,text:x})),el('option',{value:'other',text:'その他（入力）'}),el('option',{value:'undecided',text:'未定'}));
-  sel.value=!d?'':d==='未定'?'undecided':menu.includes(d)?'m:'+d:'other';
-  $('editother').value=d&&d!=='未定'&&!menu.includes(d)?d:'';
+  // 選択肢は、メニューが変わったときだけ作り直します（開いているプルダウンが閉じないように）
+  const sig=JSON.stringify(menu);
+  if(sel.dataset.menu!==sig){sel.replaceChildren(el('option',{value:'',text:'未登録'}),...menu.map(x=>el('option',{value:'m:'+x,text:x})),el('option',{value:'other',text:'その他（入力）'}),el('option',{value:'undecided',text:'未定'}));sel.dataset.menu=sig;}
+  const want=!d?'':d==='未定'?'undecided':menu.includes(d)?'m:'+d:'other';
+  if(sel.value!==want)sel.value=want;
+  const other=d&&d!=='未定'&&!menu.includes(d)?d:'';
+  if($('editother').value!==other)$('editother').value=other;
  }
+ $('editclaim').textContent=p.claimedAt?'受付：'+p.claimedAt:'まだ受付していません';
  $('releasewrap').hidden=!p.claimedAt;
  toggleOther();kindHint();
 }
@@ -859,6 +871,7 @@ $('editdelete').onclick=async()=>{
  if(!editing)return;
  const {id,name}=editing;
  if(!await ask('名簿から削除',name+'さんを名簿から削除します。席とドリンクの記録も消え、配ったQRコードは使えなくなります。','削除する',true))return;
+ if(!person(id))return; // 確認している間に、ほかの端末で削除されていた
  act('adminDeletePerson',[id],()=>{$('editdialog').close();ok(name+'さんを名簿から削除しました。');});
 };
 $('editdialog').addEventListener('close',()=>{
@@ -872,15 +885,16 @@ function openQr(id){
  qrId=id;fillQr(p);$('qrerror').hidden=true;
  if(!$('qrdialog').open){$('qrdialog').showModal();refresh(false);} // 別の端末でQRが作り直されていないか確かめます
 }
+function qrSubText(p){return '状態：'+stateText(p)+(p.claimedAt?'（受付済み '+String(p.claimedAt).replace(/^\d{4}\//,'')+'）':'')+' ／ ドリンク：'+drinkText(p);}
 function fillQr(p){
  const link=linkFor(p),box=$('qrbox');
  $('qrtitle').textContent=p.name+' さん';
- $('qrsub').textContent='状態：'+stateText(p)+' ／ ドリンク：'+drinkText(p);
+ $('qrsub').textContent=qrSubText(p);
  box.replaceChildren();
  const svg=link?qrSvgCached(link):null;
  if(svg)box.innerHTML=svg;
  else box.append(el('p',{class:'emptynote',text:link?'QRコードに収まりません。QR用のURLを短くしてください。':'QRに使うURLがありません。先にWebアプリとしてデプロイしてください。'}));
- $('qrhint').textContent='スマホのカメラで読み取ると、くじとドリンクの画面が開きます。';
+ $('qrhint').textContent='スマホのカメラで読み取ると、くじとドリンクの画面が開きます。'+(p.claimedAt?'':'（開いた時点で「受付済み」になります。「この端末で開く」で試したときも同じです）');
  $('qrlink').value=link;
  $('qrcopy').disabled=!link;
  if(link){$('qropen').href=link;$('qropen').removeAttribute('aria-disabled');}else{$('qropen').removeAttribute('href');$('qropen').setAttribute('aria-disabled','true');}
@@ -898,7 +912,8 @@ $('qrcopy').onclick=async()=>{
 };
 $('qrreissue').onclick=async()=>{
  const id=qrId,p=person(id);if(!p)return;
- if(!await ask('QRを作り直す',p.name+'さんのQRコードを新しくします。前のQRコード（印刷済みのカードを含む）は使えなくなります。席とドリンクはそのままです。','作り直す',true))return;
+ if(!await ask('QRを作り直す',p.name+'さんのQRコードを新しくします。前のQRコード（印刷済みのカードを含む）は使えなくなり、「受付済み」も取り消されます（共通QRからお名前を選び直せるようになります）。席とドリンクはそのままです。','作り直す',true))return;
+ if(!person(id))return;
  act('adminReissueToken',[id],()=>{const q=person(id);if(q&&$('qrdialog').open&&qrId===id){fillQr(q);$('qrhint').textContent='新しいQRコードにしました。';}ok(p.name+'さんのQRコードを作り直しました。');});
 };
 
@@ -908,7 +923,7 @@ $('joinopen').onclick=()=>{
  act('adminSaveSettings',[{joinOpen:next}],()=>ok(next?'共通QRでの受付を再開しました。':'共通QRでの受付を停止しました。'));
 };
 $('joincopy').onclick=async()=>{
- const v=$('joinlink').value;if(!v)return;
+ const v=S&&S.settings.joinUrl;if(!v)return;
  try{await navigator.clipboard.writeText(v);$('joinstate').textContent='リンクをコピーしました。';}
  catch(e){
   $('joinlink').focus();$('joinlink').select();
@@ -918,7 +933,7 @@ $('joincopy').onclick=async()=>{
 };
 $('joinreset').onclick=async()=>{
  if(!await ask('共通QRを作り直す','新しい共通QRコードにします。前の共通QR（貼り出したポスターや送ったリンク）は使えなくなります。受付済みの方のスマホ・席・ドリンクはそのままです。','作り直す',true))return;
- act('adminResetJoinCode',[],()=>{qrCache.clear();ok('共通QRコードを作り直しました。ポスターを印刷し直してください。');});
+ act('adminResetJoinCode',[],()=>{qrCache.clear();ok('共通QRコードを作り直しました。ポスターを印刷し直し、「大きく表示」のタブを開いていれば開き直してください。');});
 };
 /* プロジェクターに映す用：共通QRだけの画面を別のタブで開きます（この画面のURLには幹事用の合言葉が入っているため、そのまま映さないように） */
 $('joinshow').onclick=()=>{
@@ -932,7 +947,8 @@ $('joinshow').onclick=()=>{
   'svg{width:min(70vh,86vw);height:auto;display:block}</style></head><body><main>'+
   (S.settings.event?'<p style="font-weight:700;color:#193961">'+esc(S.settings.event)+'</p>':'')+
   '<h1>席くじ・ドリンク受付</h1>'+svg+'<p>スマホのカメラで読み取って、ご自身のお名前を選んでください。</p></main></body></html>';
- const w=window.open(URL.createObjectURL(new Blob([html],{type:'text/html'})),'_blank');
+ const u=URL.createObjectURL(new Blob([html],{type:'text/html'})),w=window.open(u,'_blank');
+ setTimeout(()=>URL.revokeObjectURL(u),w?60000:0);
  if(!w)showError(Error('新しいタブを開けませんでした。ブラウザのポップアップの設定をご確認ください。'));
  else ok('共通QRを別のタブで開きました。そのタブをプロジェクターに映してください（この幹事画面は映さないでください）。');
 };
