@@ -1,0 +1,518 @@
+<!doctype html>
+<html lang="ja"><head><base target="_top"><meta charset="utf-8"><meta name="robots" content="noindex"><title>席くじ</title><style>
+:root{font-family:system-ui,-apple-system,'Noto Sans JP',sans-serif;color:#182d4a;background:#f3f6fb;font-size:16px}
+*{box-sizing:border-box}
+html,body{background:#f3f6fb}
+body{margin:0;min-height:100vh;min-height:100svh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px 16px}
+main,.card{width:100%;max-width:420px;background:#fff;border:1px solid #dfe6ef;border-radius:24px;padding:30px 22px;text-align:center;box-shadow:0 12px 40px #213a6314}
+.event{font-size:14px;font-weight:700;letter-spacing:.12em;color:#597089;margin:0 0 6px;overflow-wrap:anywhere}
+h1{font-size:28px;margin:0 0 6px;overflow-wrap:anywhere;line-height:1.35}
+h2{font-size:20px;margin:0 0 14px;color:#193961}
+.lead{color:#617087;font-size:15px;line-height:1.9;margin:14px 0 22px}
+button{cursor:pointer;border:0;border-radius:14px;font:inherit;font-weight:700;min-height:56px;padding:14px 22px;background:#e9eff8;color:#183659;touch-action:manipulation}
+button:focus-visible,input:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+button:disabled{cursor:default;opacity:.55}
+.primary{background:#2255aa;color:#fff;font-size:20px;min-height:66px;width:100%;box-shadow:0 6px 14px #2255aa26}
+.primary:active:not(:disabled){transform:translateY(1px)}
+.number{font-size:110px;line-height:1.1;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.05em;color:#193961;margin:10px 0 4px;min-height:124px;display:flex;align-items:center;justify-content:center;gap:4px}
+.tablename{font-size:40px;font-weight:800;color:#193961;margin:12px 0 -6px;line-height:1.2;overflow-wrap:anywhere}
+.tablename.rolling{color:#8fa3bf}
+.fixedtable{font-size:34px;font-weight:800;color:#193961;margin:4px 0 0;overflow-wrap:anywhere}
+.number small{font-size:26px;letter-spacing:0;font-weight:700}
+.rolling{color:#8fa3bf}
+.pop{animation:pop .45s ease-out}
+@keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.12)}100%{transform:scale(1)}}
+.who{font-size:19px;font-weight:700;margin:0;overflow-wrap:anywhere}
+.hint{color:#617087;font-size:14px;line-height:1.9}
+.again{margin-top:18px;font-size:14px;min-height:44px;padding:10px 16px;background:transparent;color:#5b708c}
+.fixedtag{display:inline-block;background:#193961;color:#fff;border-radius:10px;padding:2px 12px;margin:0 2px}
+.err{background:#fff0ee;color:#a02a18;border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.7;margin:0 0 16px;text-align:left;overflow-wrap:anywhere}
+.loading{color:#617087;font-size:16px;margin:0}
+.drinks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.drinks button{min-height:58px;padding:10px 8px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;border:2px solid transparent}
+.drinks button.sel{background:#193961;color:#fff}
+.drinks .wide{grid-column:1/-1}
+.drinks .later{background:#fff;border-color:#cfd9e6;color:#44566f}
+.drinks .later.sel{background:#193961;border-color:#193961;color:#fff}
+.other{display:flex;gap:8px;margin-top:10px}
+.other input{flex:1;min-width:0;font:inherit;font-size:17px;min-height:56px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff}
+.other button{background:#2255aa;color:#fff;padding:10px 18px;flex:none}
+.msg{margin:14px 0 0;font-size:15px;line-height:1.8;min-height:1.8em;overflow-wrap:anywhere}
+.msg.ok{color:#1d6b3a;font-weight:700}
+.msg.ng{color:#a02a18;font-weight:700}
+.current{font-size:22px;font-weight:800;color:#193961;margin:8px 0 0;overflow-wrap:anywhere}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.search{width:100%;font:inherit;font-size:17px;min-height:52px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff;margin:0 0 12px}
+.names{display:grid;gap:8px;text-align:left}
+.names button{width:100%;min-height:54px;text-align:left;font-size:17px;padding:12px 16px;overflow-wrap:anywhere;display:flex;justify-content:space-between;align-items:center;gap:10px}
+.names button .tag{font-size:12px;font-weight:700;color:#5b708c;flex:none}
+.names button:disabled{opacity:1;background:#f4f6fa;color:#8a97aa}
+.names .empty{color:#617087;font-size:15px;margin:6px 2px}
+.confirmname{font-size:26px;font-weight:800;color:#193961;margin:6px 0 4px;overflow-wrap:anywhere}
+.stack{display:grid;gap:10px;margin-top:18px}
+.switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
+.linkbtn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;border-radius:14px;background:#e9eff8;color:#183659;font-weight:700;text-decoration:none}
+.linkbtn:focus-visible,h1:focus-visible,.who:focus-visible,.confirmname:focus-visible,.err:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+#mylinkbox{padding:18px 20px}
+[hidden]{display:none!important}
+@media (max-width:340px){.drinks{grid-template-columns:1fr}.number{font-size:92px}}
+@media (prefers-reduced-motion:reduce){.pop{animation:none}}
+</style></head><body>
+<main id="main">
+ <p class="loading" id="loading" role="status">読み込み中…</p>
+ <div id="bad" hidden>
+  <h1 id="badtitle">席の情報が読み取れません</h1>
+  <p class="err" id="badmsg" role="alert"></p>
+  <p class="lead" id="badlead">お手数ですが、受付でお渡ししたQRコードをもう一度読み取ってください。うまくいかないときは受付にお声がけください。</p>
+  <button id="reload">もう一度読み込む</button>
+ </div>
+ <div id="intro" hidden>
+  <p class="event" data-ev></p>
+  <h1 id="name" tabindex="-1"></h1>
+  <p class="lead">ボタンを押すと、あなたのお席が決まります。</p>
+  <p class="err" id="drawerr" role="alert" hidden></p>
+  <button class="primary" id="draw">くじを引く</button>
+ </div>
+ <div id="result" hidden>
+  <p class="event" data-ev></p>
+  <p class="who" id="name2" tabindex="-1"></p>
+  <p class="tablename" id="tablename" hidden></p>
+  <div class="number" id="number"></div>
+  <p class="sr" id="announce" role="status"></p>
+  <p class="hint" id="resulthint" hidden>卓と席の番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
+  <button class="again" id="again" hidden>もう一度演出を見る</button>
+ </div>
+ <div id="join" hidden>
+  <p class="event" data-ev></p>
+  <h1 style="font-size:24px" id="joinh" tabindex="-1">お名前を選んでください</h1>
+  <p class="lead" style="margin-bottom:16px">ご自身のお名前をタップしてください。</p>
+  <p class="err" id="joinerr" role="alert" tabindex="-1" hidden></p>
+  <label class="sr" for="joinsearch">お名前で絞り込み</label>
+  <input class="search" id="joinsearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="お名前の一部で絞り込み（例：やま）">
+  <div class="names" id="joinlist"></div>
+  <p class="hint" style="margin:16px 0 0">お名前が見つからないときは、受付にお声がけください。</p>
+ </div>
+ <div id="confirm" hidden>
+  <p class="event" data-ev></p>
+  <p class="lead" style="margin:0">このお名前で受付します。</p>
+  <p class="confirmname" id="confirmname" tabindex="-1"></p>
+  <p class="hint">一度選ぶと、ほかのスマホからはこのお名前を選べなくなります。</p>
+  <p class="err" id="confirmerr" role="alert" hidden></p>
+  <div class="stack">
+   <button class="primary" id="confirmyes">はい、自分です</button>
+   <button id="confirmno">戻る</button>
+  </div>
+ </div>
+ <div id="fixed" hidden>
+  <p class="event" data-ev></p>
+  <h1 id="fixedname" tabindex="-1"></h1>
+  <p class="fixedtable" id="fixedtable" hidden></p>
+  <p class="lead">お席はご案内します。<br>くじを引く必要はありません。</p>
+ </div>
+</main>
+<section class="card" id="drinkbox" hidden aria-labelledby="drinkh">
+ <h2 id="drinkh">1杯目のドリンク</h2>
+ <div id="drinkopen">
+  <div class="drinks" id="drinklist"></div>
+  <form class="other" id="otherform" hidden>
+   <label class="sr" for="otherinput">ドリンク名</label>
+   <input id="otherinput" type="text" maxlength="30" autocomplete="off" enterkeyhint="done" placeholder="例：ジンジャーエール">
+   <button type="submit" id="othersave">決定</button>
+  </form>
+  <p class="msg" id="drinkmsg" role="status" aria-live="polite"></p>
+ </div>
+ <div id="drinkclosed" hidden>
+  <p class="lead" style="margin:0">ドリンクの受付は締め切りました。</p>
+  <p class="hint" style="margin:10px 0 0">現在の登録</p>
+  <p class="current" id="drinkcurrent"></p>
+ </div>
+</section>
+<section class="card" id="mylinkbox" hidden>
+ <p class="hint" style="margin:0 0 10px">このスマホでもう一度開くときは、同じQRコードを読み取るか、下の「自分専用のページ」を開いてブックマーク（ホーム画面に追加）しておくと確実です。</p>
+ <a class="linkbtn" id="mylink" target="_top" rel="noopener">自分専用のページを開く</a>
+</section>
+<button class="switch" id="switchperson" hidden>ほかの方の受付をする（このスマホで続けて選ぶ）</button>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const UNDECIDED='未定';
+const reduced=()=>{try{return window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}};
+const clean=t=>String(t==null?'':t).replace(/[​-‍⁠﻿­]/g,'').normalize('NFKC').trim().replace(/\s+/g,' ');
+let token='',view=null,rolling=null,replayTimer=null,drawing=false,saving=false,otherOpen=false;
+let joinCode='',joinPeople=[],picked=null,claiming=false;
+// 表示している人が変わるたびに増やします。古い人あての返事が遅れて届いても、画面を上書きしないようにするためです
+let gen=0;
+let savedFocus=''; // 保存中はボタンを押せなくするのでフォーカスが外れます。保存後に同じボタンへ戻すために覚えておきます
+
+const NET_ERR='通信に失敗しました。電波の良い場所で、もう一度お試しください。';
+const TIMEOUT_MS=window.__SEKI_TIMEOUT_MS||20000; // 返事が来ないまま待たせない（テストでは短くできます）
+/*
+ * サーバーのエラー文を画面用に整えます。
+ * このアプリのサーバーが出すエラーは日本語です。英語だけのもの（NetworkError、Googleの一時的なエラー、タイムアウトなど）は
+ * 通信のエラーとして扱い、自動でやり直します。
+ */
+function errText(e){
+ let m=String(e&&e.message!=null?e.message:e==null?'':e).replace(/^(?:Uncaught\s+)?(?:[A-Za-z]*Error|Exception):\s*/,'').trim();
+ if(!m||!/[぀-ヿ一-鿿]/.test(m))return NET_ERR;
+ return m;
+}
+// Googleの仕組みが日本語で返す一時的なエラーも、通信のエラーとして扱います
+const transient=m=>m===NET_ERR||/混み合って|サーバー\s*エラー|しばらくして|タイムアウト|時間切れ|同時に|一時的/.test(m);
+// 呼び出しはすべて、何度呼んでも同じ結果になるように作ってあるので、通信エラー・混雑のときは少し待って自動でやり直します
+function run(fn,args,ok,ng,tries){
+ tries=tries||0;
+ const g=gen;let done=false;
+ const timer=setTimeout(()=>{if(!done){done=true;fail(NET_ERR,true);}},TIMEOUT_MS);
+ const settle=f=>v=>{if(done)return;done=true;clearTimeout(timer);f(v);};
+ function fail(m,timedOut){
+  if(g!==gen)return; // 別の人の画面に変わっていたら何もしない
+  if(transient(m)&&!timedOut&&tries<3)setTimeout(()=>{if(g===gen)run(fn,args,ok,ng,tries+1);},1200*(tries+1)+Math.floor(Math.random()*800));
+  else ng(m);
+ }
+ try{
+  const r=google.script.run.withSuccessHandler(settle(v=>{if(g===gen)ok(v);})).withFailureHandler(settle(e=>fail(errText(e))));
+  r[fn].apply(r,args);
+ }catch(e){settle(()=>fail(NET_ERR))();}
+}
+function show(id){
+ for(const s of ['loading','bad','intro','result','fixed','join','confirm'])$(s).hidden=s!==id;
+ syncSwitch(id);
+}
+let shown='loading';
+function syncSwitch(id){
+ if(id)shown=id;
+ const person=joinCode&&token&&(shown==='intro'||shown==='result'||shown==='fixed');
+ // 共通QRで開いたときは、同じスマホで別の方を受付できるようにします（スマホを持っていない方の代わりなど）
+ $('switchperson').hidden=!person;
+ $('switchperson').disabled=drawing||saving;
+ const link=person&&view&&view.link;
+ $('mylinkbox').hidden=!link;
+ if(link)$('mylink').href=view.link;
+}
+function focusEl(el){if(el&&!el.hidden){try{el.focus({preventScroll:true});}catch(e){}}}
+function bad(msg){
+ gen++;resetPerson();show('bad');msg=msg||'QRコードが無効です。受付にお声がけください。';
+ // 通信の問題・受付の停止のときは、「QRコードが読み取れない」とは言わずに案内します
+ const net=transient(msg),stop=/停止/.test(msg);
+ $('badtitle').textContent=net?'読み込めませんでした':stop?'いまは受付していません':'席の情報が読み取れません';
+ $('badlead').textContent=net?'電波の良い場所で、下のボタンからもう一度読み込んでください。':stop?'受付が再開されたら、もう一度読み取ってください。うまくいかないときは受付にお声がけください。':'お手数ですが、受付でお渡ししたQRコードをもう一度読み取ってください。うまくいかないときは受付にお声がけください。';
+ $('badmsg').textContent=msg;$('drinkbox').hidden=true;
+}
+// 前の方の入力・メッセージ・演出を片付けます（共通QRで次の方に替わるとき）
+function resetPerson(){
+ stopRoll();drawing=false;saving=false;claiming=false;
+ otherOpen=false;$('otherinput').value='';msg('','');syncOther();
+ $('drawerr').hidden=true;$('draw').disabled=false;$('draw').textContent='くじを引く';
+}
+// 個別のトークンが使えなくなったとき（幹事がQRを作り直した・受付をやり直した）。共通QRなら名前選びに戻ります
+function badToken(m){
+ if(joinCode){forget(token);$('joinsearch').value='';joinLoad('このスマホで前に受付した情報は使えなくなりました（受付のやり直し・QRの作り直しなど）。もう一度お名前を選んでください。');}
+ else bad(m);
+}
+function setCommon(v){
+ document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=v.event||'';e.hidden=!v.event;});
+ $('name').textContent=v.name+' さん';
+ $('name2').textContent=v.name+' さんのお席';
+ const f=$('fixedname');f.replaceChildren(document.createTextNode(v.name+' さんは '));
+ const tag=document.createElement('span');tag.className='fixedtag';tag.textContent='固定席';
+ f.append(tag,document.createTextNode(' です'));
+ const ft=$('fixedtable');ft.hidden=!(v.kind==='fixed'&&v.table);ft.textContent=v.table?'お席：'+v.table:'';
+}
+// 卓の名前（「A卓」など）。卓を使っていないときは出しません
+function showTable(name,isRolling){
+ const t=$('tablename');t.hidden=!name;t.textContent=name||'';
+ t.className='tablename'+(isRolling?' rolling':'');
+ if(isRolling)t.setAttribute('aria-hidden','true');else t.removeAttribute('aria-hidden');
+}
+function seatWords(v){return v.table?v.table+' '+v.tableSeat+'番':v.seat+'番';}
+function showNumber(text,isRolling){
+ const n=$('number');
+ // くるくる回っている数字は読み上げません（結果だけを #announce で知らせます）
+ if(isRolling)n.setAttribute('aria-hidden','true');else n.removeAttribute('aria-hidden');
+ n.replaceChildren(document.createTextNode(text));
+ if(!isRolling){const small=document.createElement('small');small.textContent='番';n.append(small);}
+ n.className='number'+(isRolling?' rolling':(reduced()?'':' pop'));
+}
+function stopRoll(){
+ if(rolling){clearInterval(rolling);rolling=null;}
+ if(replayTimer){clearTimeout(replayTimer);replayTimer=null;}
+}
+function startRoll(top){
+ stopRoll();$('announce').textContent='抽選しています';
+ top=Math.max(top||0,20);
+ const tables=(view&&view.tables)||[];
+ // 卓があるときは、卓の名前と卓の中の番号をくるくる回します
+ const tick=tables.length
+  ?()=>{const t=tables[Math.floor(Math.random()*tables.length)];showTable(t.name,true);showNumber(String(1+Math.floor(Math.random()*t.seats)),true);}
+  :()=>{showTable('',true);showNumber(String(1+Math.floor(Math.random()*top)),true);};
+ tick();rolling=setInterval(tick,80);
+}
+function showSeat(v){
+ stopRoll();show('result');
+ showTable(v.table||'',false);
+ showNumber(String(v.table?v.tableSeat:v.seat),false);
+ $('announce').textContent=v.name+' さんのお席は '+seatWords(v)+' です。';
+ $('resulthint').hidden=false;$('again').hidden=false;
+}
+
+/* ---- 共通QR（全員同じQR）：名前を選ぶ ---- */
+// 受付した方のトークンと、このスマホの確認キーを覚えておきます（共通QRを作り直しても使えるよう、QRごとには分けません）
+const TOKEN_KEY='sekikuji.join.token',DEVICE_KEY='sekikuji.device';
+function store(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);return true;}catch(e){return false;}}
+function load1(k){try{return localStorage.getItem(k)||'';}catch(e){return '';}}
+function remembered(){return load1(TOKEN_KEY);}
+function remember(t){store(TOKEN_KEY,t);}
+function forget(t){if(!t||remembered()===t)remember('');}
+let memDevice='';
+function deviceKey(){
+ let k=load1(DEVICE_KEY);
+ if(/^[A-Za-z0-9]{16,64}$/.test(k))return k;
+ if(!memDevice){
+  const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',a=new Uint8Array(24);
+  (window.crypto||window.msCrypto).getRandomValues(a);
+  memDevice=Array.from(a,x=>c[x%62]).join('');
+ }
+ store(DEVICE_KEY,memDevice);
+ return memDevice;
+}
+function joinStart(){
+ const t=remembered();
+ if(t){
+  token=t;show('loading');
+  // 通信エラーのときは覚えたトークンを消さずに「もう一度読み込む」を出します
+  run('participantGet',[t],v=>render(v,true),m=>{if(/QRコード/.test(m)){forget(t);token='';$('joinsearch').value='';joinLoad('このスマホで前に受付した情報は使えなくなりました（受付のやり直し・QRの作り直しなど）。もう一度お名前を選んでください。');}else bad(m);});
+ }else joinLoad();
+}
+function joinLoad(message){
+ gen++;resetPerson();
+ token='';view=null;picked=null;show('loading');$('drinkbox').hidden=true;
+ run('joinList',[joinCode,deviceKey()],r=>{
+  joinPeople=r.people||[];
+  document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=r.event||'';e.hidden=!r.event;});
+  show('join');renderJoin();
+  const e=$('joinerr');e.textContent=message||'';e.hidden=!message;
+  focusEl(message?e:$('joinh'));
+ },m=>bad(m));
+}
+// 絞り込み用：空白を無視し、カタカナはひらがなに、英字は小文字にそろえます
+function norm(t){return clean(t).replace(/\s/g,'').toLowerCase().replace(/[ァ-ヶ]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));}
+function renderJoin(){
+ const q=norm($('joinsearch').value);
+ const hit=joinPeople.filter(p=>!q||norm(p.name).includes(q));
+ // このスマホで受付した方 → まだの方 → ほかのスマホで受付済みの方（押せない）の順に並べます
+ const list=hit.filter(p=>p.mine).concat(hit.filter(p=>!p.claimed),hit.filter(p=>p.claimed&&!p.mine));
+ const root=$('joinlist'),items=[];
+ for(const p of list){
+  const b=document.createElement('button');b.type='button';
+  const n=document.createElement('span');n.textContent=p.name;b.append(n);
+  if(p.claimed){
+   const t=document.createElement('span');t.className='tag';t.textContent=p.mine?'このスマホで受付済み':'受付済み';b.append(t);
+   if(p.mine){b.onclick=()=>{if(claiming)return;picked=p;show('loading');claim();};b.setAttribute('aria-label',p.name+'（このスマホで受付済み。押すと開きます）');}
+   else{b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
+  }else b.onclick=()=>pick(p);
+  items.push(b);
+ }
+ if(!items.length){const e=document.createElement('p');e.className='empty';e.textContent=joinPeople.length?'該当するお名前がありません。':'名簿がまだ登録されていません。受付にお声がけください。';items.push(e);}
+ root.replaceChildren(...items);
+}
+let confirmTimer=null;
+function pick(p){
+ if(claiming)return;
+ picked=p;$('confirmname').textContent=p.name+' さん';
+ $('confirmerr').hidden=true;$('confirmno').disabled=false;
+ // 名前をすばやく2回タップしたとき、2回目が「はい、自分です」に当たって確認なしで受付されないよう、少しだけ押せなくします
+ const yes=$('confirmyes');yes.disabled=true;yes.textContent='はい、自分です';
+ clearTimeout(confirmTimer);confirmTimer=setTimeout(()=>{if(!claiming)yes.disabled=false;},500);
+ show('confirm');focusEl($('confirmname'));
+}
+function claim(){
+ if(claiming||!picked)return;
+ claiming=true;$('confirmyes').disabled=true;$('confirmno').disabled=true;$('confirmyes').textContent='受付しています…';
+ const who=picked;
+ run('joinClaim',[joinCode,who.id,deviceKey()],r=>{
+  claiming=false;$('confirmyes').textContent='はい、自分です';
+  if(picked!==who)return; // 別の方を選び直していた
+  gen++;token=r.token;remember(r.token);picked=null;
+  render(r.view,true);
+ },m=>{
+  claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
+  if(transient(m)){
+   if(shown!=='confirm'){joinLoad(m);return;}
+   $('confirmyes').disabled=false;const e=$('confirmerr');e.textContent=m;e.hidden=false;focusEl($('confirmyes'));return;
+  }
+  if(/受付済み/.test(m)||/該当する方/.test(m)){$('joinsearch').value='';joinLoad(m);return;}
+  bad(m);
+ });
+}
+$('joinsearch').oninput=renderJoin;
+$('confirmyes').onclick=claim;
+$('confirmno').onclick=()=>{picked=null;$('joinerr').hidden=true;joinLoad();};
+$('switchperson').onclick=()=>{
+ if(drawing||saving)return;
+ // 覚えているトークンは、次の方の受付が済むまで消しません（途中でやめても、この方の画面に戻れるように）
+ $('joinsearch').value='';joinLoad();
+};
+
+function load(){
+ show('loading');$('drinkbox').hidden=true;
+ // 個別QRで開いた方も、このスマホに覚えておきます（あとで共通QRを読み取ったときに、名前を選ばずに自分の画面へ戻れるように）
+ run('participantGet',[token],v=>{remember(token);render(v,true);},m=>bad(m));
+}
+// 画面全体をサーバーの状態から描き直す
+function render(v,full){
+ view=v;setCommon(v);
+ if(full){
+  stopRoll();
+  if(v.kind==='fixed'){show('fixed');focusEl($('fixedname'));}
+  else if(v.seat!=null){showSeat(v);focusEl($('name2'));}
+  else{show('intro');$('draw').disabled=false;$('draw').textContent='くじを引く';$('drawerr').hidden=true;focusEl($('name'));}
+ }
+ renderDrink(v.kind==='fixed'||v.seat!=null);
+ syncSwitch();
+}
+
+/* ---- くじ ---- */
+function draw(){
+ if(drawing||!view)return;
+ drawing=true;syncSwitch();
+ const btn=$('draw');btn.disabled=true;$('drawerr').hidden=true;
+ const t0=Date.now(),min=reduced()||document.hidden?0:1500;
+ let got=null,timer=null;
+ if(min){
+  $('name2').textContent=view.name+' さんのお席';
+  show('result');$('resulthint').hidden=true;$('again').hidden=true;
+  startRoll(view.seatsLeft);
+ }else btn.textContent='抽選しています…';
+ const g=gen;
+ const finish=()=>{
+  if(!got||g!==gen)return;
+  drawing=false;
+  render(got,true);
+  focusEl($('again').hidden?$('fixedname'):$('again'));
+ };
+ run('participantDraw',[token],v=>{
+  got=v;
+  const wait=min-(Date.now()-t0);
+  if(wait>0)timer=setTimeout(finish,wait);else finish();
+ },m=>{
+  if(timer)clearTimeout(timer);
+  stopRoll();$('announce').textContent='';show('intro');
+  const showErr=()=>{const e=$('drawerr');e.textContent=m;e.hidden=false;btn.disabled=false;btn.textContent='もう一度くじを引く';focusEl(btn);};
+  showErr();
+  // 幹事が区分を変えた・QRを作り直した などサーバー側が変わったときは、最新の状態を読み直して画面を切り替えます
+  if(!transient(m)){
+   btn.disabled=true;
+   run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else btn.disabled=false;});
+  }else{drawing=false;syncSwitch();}
+ });
+}
+function replay(){
+ if(!view||view.seat==null||rolling||drawing||shown!=='result')return;
+ if(reduced()||document.hidden){showSeat(view);return;}
+ $('again').hidden=true;
+ startRoll(view.tables&&view.tables.length?0:view.seat);
+ const g=gen;
+ replayTimer=setTimeout(()=>{replayTimer=null;if(g!==gen||!view)return;if(view.seat!=null&&shown==='result')showSeat(view);else render(view,true);},1500);
+}
+
+/* ---- ドリンク ---- */
+function isOther(d){return d!=null&&d!==UNDECIDED&&!(view.drinks||[]).includes(d);}
+function drinkLabel(d){return d===UNDECIDED?'未定（あとで決める）':d;}
+function renderDrink(visible){
+ const box=$('drinkbox');box.hidden=!visible;
+ if(!visible||!view)return;
+ const d=view.drink==null?null:String(view.drink);
+ if(!view.drinkOpen){
+  $('drinkopen').hidden=true;$('drinkclosed').hidden=false;
+  $('drinkcurrent').textContent=d==null?'登録はありません':drinkLabel(d);
+  return;
+ }
+ $('drinkopen').hidden=false;$('drinkclosed').hidden=true;
+ const list=$('drinklist'),items=[];
+ // 描き直しても、押したボタンにフォーカスを残します（キーボード・読み上げの方のため）
+ const a=document.activeElement,keep=(a&&list.contains(a)?(a.id||a.dataset.key||''):'')||(!saving?savedFocus:'');
+ if(!saving)savedFocus='';
+ for(const m of view.drinks||[]){
+  const b=document.createElement('button');b.type='button';b.textContent=m;b.dataset.key='m:'+m;
+  b.className=d===m?'sel':'';b.setAttribute('aria-pressed',String(d===m));
+  b.onclick=()=>{otherOpen=false;syncOther();save(m);};
+  items.push(b);
+ }
+ const o=document.createElement('button');o.type='button';o.id='otherbtn';
+ o.textContent=isOther(d)?'その他：'+d:'その他（入力）';
+ o.className='wide'+(isOther(d)?' sel':'');o.setAttribute('aria-pressed',String(isOther(d)));
+ o.setAttribute('aria-expanded',String(otherOpen));
+ o.onclick=()=>{
+  otherOpen=!otherOpen;syncOther();
+  if(otherOpen){const i=$('otherinput');if(!i.value&&isOther(view.drink))i.value=view.drink;i.focus();}
+  else if($('drinkmsg').classList.contains('ng'))msg('',''),renderDrink(true); // 閉じたら入力エラーの表示も消す
+ };
+ items.push(o);
+ const l=document.createElement('button');l.type='button';l.textContent='あとで決める（未定）';
+ l.className='wide later'+(d===UNDECIDED?' sel':'');l.dataset.key='later';l.setAttribute('aria-pressed',String(d===UNDECIDED));
+ l.onclick=()=>{otherOpen=false;syncOther();save(UNDECIDED);};
+ items.push(l);
+ list.replaceChildren(...items);
+ if(keep){const t=items.find(x=>(x.id||x.dataset.key)===keep);if(t)t.focus({preventScroll:true});}
+ syncOther();setBusy(saving);
+ if(!saving&&!$('drinkmsg').dataset.keep){
+  msg(d==null?'':(d===UNDECIDED?'「未定」で登録しています。決まったら選び直してください。':'「'+d+'」で登録済みです。変更もできます。'),'');
+ }
+}
+function syncOther(){
+ $('otherform').hidden=!otherOpen;
+ const o=$('otherbtn');if(o)o.setAttribute('aria-expanded',String(otherOpen));
+}
+function setBusy(b){
+ document.querySelectorAll('#drinkbox button,#drinkbox input').forEach(e=>e.disabled=b);
+ syncSwitch();
+}
+function msg(text,cls,keep){
+ const m=$('drinkmsg');m.textContent=text;m.className='msg'+(cls?' '+cls:'');
+ if(keep)m.dataset.keep='1';else delete m.dataset.keep;
+}
+function save(drink){
+ if(saving||!view)return;
+ drink=clean(drink);
+ if(!drink){msg('ドリンク名を入力してください。','ng',true);$('otherinput').focus();return;}
+ if(drink.length>30){msg('ドリンク名は30文字以内で入力してください。','ng',true);return;}
+ const fa=document.activeElement;savedFocus=fa&&$('drinklist').contains(fa)?(fa.id||fa.dataset.key||''):(fa&&fa.id==='othersave'?'otherbtn':'');
+ saving=true;setBusy(true);msg('保存しています…','',true);
+ run('participantSetDrink',[token,drink],v=>{
+  saving=false;
+  // 幹事が席を空きに戻した・区分を変えた などで画面と違っていたら、画面全体を描き直します
+  const changed=!view||v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat;
+  if(!isOther(v.drink))$('otherinput').value='';
+  otherOpen=false;
+  msg((v.drink===UNDECIDED?'「未定」':'「'+v.drink+'」')+'で登録しました。変更もできます。','ok',true);
+  render(v,changed);
+ },m=>{
+  // 締め切り・QR無効のときは、最新の状態を読み直すまで押せないままにします
+  const reload=/締め切/.test(m)||/QRコード/.test(m);
+  if(!reload){saving=false;setBusy(false);}
+  msg(m,'ng',true);
+  const reloadFail=m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else setBusy(false);};
+  if(/締め切/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat);},reloadFail);
+  else if(/QRコード/.test(m))run('participantGet',[token],v=>{saving=false;render(v,true);},reloadFail);
+ });
+}
+$('otherform').onsubmit=e=>{e.preventDefault();save($('otherinput').value);};
+$('draw').onclick=draw;
+$('again').onclick=replay;
+$('reload').onclick=start;
+
+function start(){
+ show('loading');
+ try{
+  google.script.url.getLocation(loc=>{
+   const p=(loc&&loc.parameter)||{};
+   token=typeof p.t==='string'?p.t.trim():'';
+   joinCode=!token&&typeof p.j==='string'?p.j.trim():'';
+   if(joinCode){joinStart();return;}
+   if(!token){bad('QRコードが無効です。受付にお声がけください。');return;}
+   load();
+  });
+ }catch(e){bad('この画面を開けませんでした。受付でお渡ししたQRコードから開いてください。');}
+}
+start();
+</script></body></html>
