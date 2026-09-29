@@ -481,7 +481,7 @@ function save(drink){
  run('participantSetDrink',[token,drink],v=>{
   saving=false;
   // 幹事が席を空きに戻した・区分を変えた などで画面と違っていたら、画面全体を描き直します
-  const changed=!view||v.kind!==view.kind||v.seat!==view.seat;
+  const changed=!view||v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat;
   if(!isOther(v.drink))$('otherinput').value='';
   otherOpen=false;
   msg((v.drink===UNDECIDED?'「未定」':'「'+v.drink+'」')+'で登録しました。変更もできます。','ok',true);
@@ -492,7 +492,7 @@ function save(drink){
   if(!reload){saving=false;setBusy(false);}
   msg(m,'ng',true);
   const reloadFail=m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else setBusy(false);};
-  if(/締め切/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat);},reloadFail);
+  if(/締め切/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat);},reloadFail);
   else if(/QRコード/.test(m))run('participantGet',[token],v=>{saving=false;render(v,true);},reloadFail);
  });
 }

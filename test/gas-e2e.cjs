@@ -670,7 +670,8 @@ async function step(name, fn) {
       await pg.locator('#drinkrows tr', { hasText: '競合 花子' }).getByRole('button', { name: /修正/ }).click();
       await pg.locator('#editdialog[open]').waitFor();
       callServer(ctx, 'adminDeletePerson', [KEY, hk.id]);
-      await pg.click('#editcancel');
+      // 開いたときの読み直しで、削除済みと分かって先に閉じていることもある
+      if (await pg.locator('#editdialog').evaluate(d => d.open)) await pg.click('#editcancel', { timeout: 2000 }).catch(() => {});
       await pg.click('#refresh');
       await pg.locator('#drinkrows tr', { hasText: '競合 花子' }).waitFor({ state: 'detached' });
       // (c) 保存中に書き足した会の名前は消えない
@@ -870,7 +871,8 @@ async function step(name, fn) {
         const beer = inT.filter(p => p.drink === 'ビール').length;
         const txt = await pg.locator('.tcard', { has: pg.locator('h4', { hasText: t.name }) }).innerText();
         if (beer) assert.match(txt, new RegExp('ビール ' + beer + '(\\D|$)'), t.name + ' のビール数');
-        assert.match(txt, new RegExp(inT.length + ' / ' + t.seats + '席'));
+        const fx = inT.filter(p => p.kind === 'fixed').length;
+        assert.match(txt, new RegExp((inT.length - fx) + ' / ' + t.seats + '席' + (fx ? ' ＋固定' + fx + '人' : '')));
       }
       assert.match(await text(pg, '#drinkrows'), new RegExp(me.table + ' ' + me.tableSeat + '番'));
       await shot(pg, 'admin-tables');
@@ -878,7 +880,18 @@ async function step(name, fn) {
       await pg.fill('#drinksearch', 'a卓');
       const shownSeats = await pg.locator('#drinkrows td.seat').allInnerTexts();
       assert.ok(shownSeats.length && shownSeats.every(x => /A卓/.test(x)), shownSeats.join(','));
+      // 卓の中の番号（見えている番号）でも探せる
+      await pg.fill('#drinksearch', String(me.tableSeat));
+      assert.match(await text(pg, '#drinkrows'), /卓 太郎/);
       await pg.fill('#drinksearch', '');
+      // 代わりに引く：「◯卓 ◯番」で知らせる
+      callServer(ctx, 'adminAddPeople', [KEY, ['卓 花子'], 'lottery']);
+      await pg.click('#tab-qr'); await pg.click('#refresh').catch(() => {});
+      await pg.evaluate(() => refresh(true)); await waitStatus(pg, /最新の状態/);
+      await pg.locator('#qrrows tr', { hasText: '卓 花子' }).getByRole('button', { name: /代わりに/ }).click();
+      await pg.click('#askyes');
+      await waitStatus(pg, /卓 花子さんの席は [ABC]卓 \d+番 です/);
+      await pg.click('#tab-drinks');
       // 印刷：卓ごとの配膳表
       await pg.click('#tableprint');
       assert.equal(await pg.evaluate(() => window.__printed), 1);

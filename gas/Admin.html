@@ -126,8 +126,8 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
 .tcard ul{list-style:none;margin:0;padding:0;font-size:14px;line-height:1.7}
 .tcard li{display:flex;gap:8px;border-top:1px solid #eef2f7;padding:3px 0}
 .tcard li .s{min-width:3.2em;color:#617087;font-variant-numeric:tabular-nums}
-.tcard li .n{flex:1;overflow-wrap:anywhere}
-.tcard li .d{font-weight:700;overflow-wrap:anywhere;text-align:right}
+.tcard li .n{flex:1 1 50%;min-width:4em;overflow-wrap:anywhere}
+.tcard li .d{flex:0 1 auto;max-width:50%;font-weight:700;overflow-wrap:anywhere;text-align:right}
 .tcard li .d.muted{font-weight:400}
 .tcard.extra{background:#fbfcfe;border-style:dashed}
 [hidden]{display:none!important}
@@ -651,7 +651,7 @@ function norm(t){return clean(t).replace(/\s/g,'').toLowerCase().replace(/[\u30a
 function matcher(q){
  q=norm(q).replace(/番$/,'');
  if(!q)return ()=>true;
- return p=>norm(p.name).includes(q)||(p.seat!=null&&String(p.seat)===q)||(!!p.fixedLabel&&norm(p.fixedLabel).includes(q))
+ return p=>norm(p.name).includes(q)||(p.seat!=null&&String(p.seat)===q)||(p.tableSeat!=null&&String(p.tableSeat)===q)||(!!p.fixedLabel&&norm(p.fixedLabel).includes(q))
   ||(!!p.table&&(norm(p.table)===q||norm(p.table).startsWith(q)||(p.tableSeat!=null&&norm(p.table+p.tableSeat)===q)));
 }
 function table(cols,heads,rows,cls){
@@ -722,6 +722,8 @@ function tableGroups(){
  }
  return groups.concat([noseat,notable].filter(g=>g.people.length));
 }
+// 「くじの席 5 / 8席 ＋固定 1人」（固定席の方は、卓の席数とは別に数えます）
+function tableCount(g){const fx=g.people.filter(p=>p.kind==='fixed').length;return (g.people.length-fx)+' / '+g.seats+'席'+(fx?' ＋固定'+fx+'人':'');}
 function renderTables(){
  const on=hasTables();$('tablesummary').hidden=!on;
  if(!on)return;
@@ -734,7 +736,7 @@ function renderTables(){
   if(!g.people.length)counts.append(el('span',{class:'cnt',text:'まだだれもいません'}));
   const ul=el('ul');
   for(const p of g.people)ul.append(el('li',null,el('span',{class:'s',text:p.kind==='fixed'?'固定':p.tableSeat!=null&&!g.extra?p.tableSeat+'番':'—'}),el('span',{class:'n',text:p.name}),el('span',{class:'d'+(p.drink?'':' muted'),text:drinkText(p)})));
-  root.append(el('div',{class:'tcard'+(g.extra?' extra':'')},el('h4',null,el('span',{text:g.name}),el('small',{text:g.extra?g.people.length+'人':g.people.length+' / '+g.seats+'席'})),counts,ul));
+  root.append(el('div',{class:'tcard'+(g.extra?' extra':'')},el('h4',null,el('span',{text:g.name}),el('small',{text:g.extra?g.people.length+'人':tableCount(g)})),counts,ul));
  }
 }
 function renderDrinks(){
@@ -826,6 +828,7 @@ function renderSetup(){
  const maxSeat=S.people.reduce((m,p)=>p.seat!=null?Math.max(m,p.seat):m,0);
  $('seatsstate').textContent='いまの設定：抽選席 '+st.seats+'席（決まっている席 '+sm.seated+'席'+(maxSeat?'・最大 '+maxSeat+'番':'')+'）／ 固定席 '+sm.fixed+'人';
  const tb=hasTables();$('seats').disabled=tb;$('seatssave').disabled=tb;
+ if(tb&&$('seats').dataset.dirty)syncField('seats',true); // 卓の合計に置き換わったので、保存していない入力は捨てます
  $('tablesstate').textContent=tb?'いまの設定：'+st.tables.length+'卓・合計 '+st.seats+'席（'+st.tables.map(t=>t.name+' '+t.seats+'席').join('、')+'）':'いまは卓を使っていません（席は通し番号です）。';
  $('appurl').textContent=st.appUrl?'QRに使うURL：'+st.appUrl:st.devUrl?'テスト用のURL（/dev）は参加者が開けないため使えません。/exec で終わるURLを下に入力してください。':'QRに使うURLがまだありません（Webアプリとしてデプロイしてください）。';
  $('rostercount').textContent='名簿 '+sm.total+'人（抽選席 '+sm.lottery+'人・固定席 '+sm.fixed+'人）';
@@ -884,7 +887,7 @@ $('resetall').onclick=()=>reset('all','名簿ごと消す','名簿・席・ド�
 async function drawOne(id){
  const p=person(id);if(!p)return;
  if(!await ask('代わりにくじを引く',p.name+'さんの席を、この画面で抽選します。','くじを引く'))return;
- act('adminDrawOne',[id],()=>{const q=person(id);ok(q&&q.seat!=null?q.name+'さんの席は '+q.seat+'番 です。':'抽選しました。');});
+ act('adminDrawOne',[id],()=>{const q=person(id);ok(q&&q.seat!=null?q.name+'さんの席は '+placeText(q)+' です。':'抽選しました。');});
 }
 $('drawall').onclick=async()=>{
  const pending=S.people.filter(p=>p.kind==='lottery'&&p.seat==null).length;
@@ -914,7 +917,12 @@ function fillEdit(p){
  const t=f=>!!$(f).dataset.touched;
  editing.name=p.name;editing.kind=p.kind;editing.drink=p.drink||null;editing.table=p.kind==='fixed'?(p.table||''):''; // 変更の比較は最新の状態と行います
  const ts=$('edittable'),tsig=JSON.stringify(S.settings.tables||[]);
- if(ts.dataset.sig!==tsig){ts.replaceChildren(el('option',{value:'',text:'未設定'}),...(S.settings.tables||[]).map(x=>el('option',{value:x.name,text:x.name})));ts.dataset.sig=tsig;}
+ if(ts.dataset.sig!==tsig){
+  // 開いている間に卓の一覧が変わったら作り直します（選んでいた卓がまだあれば、選んだままにします）
+  const keep=ts.value;
+  ts.replaceChildren(el('option',{value:'',text:'未設定'}),...(S.settings.tables||[]).map(x=>el('option',{value:x.name,text:x.name})));ts.dataset.sig=tsig;
+  if(t('edittable')){if((S.settings.tables||[]).some(x=>x.name===keep))ts.value=keep;else delete ts.dataset.touched;}
+ }
  if(!t('edittable'))ts.value=editing.table;
  $('edittitle').textContent=p.name+' さん';
  if(!t('editname'))$('editname').value=p.name;
@@ -938,9 +946,9 @@ function toggleOther(){const o=$('editdrink').value==='other';$('editotherwrap')
 function kindHint(){
  const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
  $('edittablewrap').hidden=!(toFixed&&hasTables());
- $('editkindhint').textContent=p&&toFixed&&p.seat!=null?'固定席に変えると、'+p.seat+'番は空きに戻ります。':toFixed?'固定席の方はくじを引きません。ドリンクだけ登録できます。':'くじを引いて席を決める方です。';
+ $('editkindhint').textContent=p&&toFixed&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります。':toFixed?'固定席の方はくじを引きません。ドリンクだけ登録できます。':'くじを引いて席を決める方です。';
  $('clearseatwrap').hidden=!(p&&p.kind==='lottery'&&p.seat!=null&&!toFixed);
- $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+p.seat+'番）を空きに戻す':'席を空きに戻す';
+ $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+placeText(p)+'）を空きに戻す':'席を空きに戻す';
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
@@ -1071,7 +1079,7 @@ $('tableprint').onclick=()=>{
   const tot=g.counts.map(x=>x[0]+' '+x[1]).concat(g.undecided?['未定 '+g.undecided]:[],g.none?['未登録 '+g.none]:[]).join('　／　')||'（なし）';
   const tb=el('table');
   for(const p of g.people)tb.append(el('tr',null,el('td',{text:p.kind==='fixed'?'固定':p.tableSeat!=null&&!g.extra?p.tableSeat+'番':'—'}),el('td',{text:p.name}),el('td',{text:drinkText(p)})));
-  root.append(el('section',{class:'tsec'},el('h2',{text:g.name+(g.extra?'':'（'+g.people.length+' / '+g.seats+'席）')}),el('p',{class:'tot',text:tot}),tb));
+  root.append(el('section',{class:'tsec'},el('h2',{text:g.name+(g.extra?'':'（'+tableCount(g)+'）')}),el('p',{class:'tot',text:tot}),tb));
  }
  window.print();
 };
@@ -1111,8 +1119,8 @@ $('csv').onclick=()=>{
  ok('CSVを保存しました。');
 };
 $('linkcsv').onclick=()=>{
- const rows=[['お名前','区分','席番号','リンク']];
- for(const p of sorted(S.people))rows.push([p.name,p.kind==='fixed'?'固定席':'抽選席',p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,linkFor(p)]);
+ const rows=[['お名前','区分','席','リンク']];
+ for(const p of sorted(S.people))rows.push([p.name,p.kind==='fixed'?'固定席':'抽選席',p.kind==='fixed'?stateText(p):p.seat==null?'未抽選':placeText(p),linkFor(p)]);
  downloadCsv(rows,'席くじ-リンク一覧-'+stamp()+'.csv');
  ok('リンク一覧を保存しました。');
 };
