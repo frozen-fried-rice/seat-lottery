@@ -237,7 +237,7 @@ function adminUpdatePersonImpl_(key, id, patch) {
       if (patch.table === null || patch.table === '') p.table = null;
       else {
         const names = db.settings.tables.map(function (t) { return t.name; });
-        const t = typeof patch.table === 'string' ? tidy_(patch.table) : '';
+        const t = typeof patch.table === 'string' ? clean_(patch.table) : '';
         if (names.indexOf(t) < 0) throw appErr_('その卓はありません。「名簿・設定」の卓の設定をご確認ください。');
         p.table = t;
       }
@@ -790,7 +790,7 @@ function load_(locked) {
       const kind = km ? 'fixed' : 'lottery';
       const rawSeat = seatOf_(r[4]);
       const p = { id: id, token: token, name: x.name, kind: kind, seat: kind === 'lottery' ? rawSeat : null, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]),
-        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row, origId: id, table: km && km[2] ? tidy_(km[2]) : null };
+        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row, origId: id, table: km && km[2] ? clean_(km[2]) : null };
       if ((rawSeat === null && r[4] !== '' && r[4] !== null) || (kind === 'fixed' && rawSeat !== null)) db.dirty = true;
       if (!p.id || ids[p.id]) { p.id = null; db.dirty = true; }
       if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokenCount[p.token] > 1) { p.token = null; p.claimedAt = null; p.claimKey = null; db.dirty = true; }
@@ -1007,7 +1007,7 @@ function parseTables_(text) {
     const l = clean_(line);
     if (!l) return;
     const m = /^(.+?)[\s,:、，：]*(\d+)\s*(?:席|人)?$/.exec(l);
-    if (!m || !tidy_(m[1].replace(/[,:、，：]+$/, ''))) throw appErr_((i + 1) + '行目「' + l.slice(0, 20) + '」を読み取れません。「A卓 8」のように、卓の名前と席数を書いてください。');
+    if (!m || !tidy_(m[1].replace(/[,:、，：]+$/, '')) || /[.\-−]\s*$/.test(m[1]) || /\d[eE]$/.test(m[1]) || /\d[,，]\d{3}\D*$/.test(l)) throw appErr_((i + 1) + '行目「' + l.slice(0, 20) + '」を読み取れません。「A卓 8」のように、卓の名前と席数を書いてください。');
     const name = tidy_(m[1].replace(/[,:、，：]+$/, '')), n = Number(m[2]);
     if (name.length > MAX_TABLE_NAME_) throw appErr_('卓の名前「' + name.slice(0, 20) + '」は' + MAX_TABLE_NAME_ + '文字以内にしてください。');
     if (!Number.isInteger(n) || n < 1 || n > MAX_SEATS_) throw appErr_('「' + name + '」の席数は1〜' + MAX_SEATS_ + 'の整数にしてください。');
@@ -1016,6 +1016,9 @@ function parseTables_(text) {
     out.push({ name: name, seats: n });
   });
   if (out.length > MAX_TABLES_) throw appErr_('卓は' + MAX_TABLES_ + '卓までです。');
+  // 合計の上限もここで確かめます（設定シートに直接書かれた場合も、上限を超えた席を配らないように）
+  const total = out.reduce(function (n, t) { return n + t.seats; }, 0);
+  if (total > MAX_SEATS_) throw appErr_('席数の合計が' + total + '席です。合計' + MAX_SEATS_ + '席までにしてください。');
   return out;
 }
 
@@ -1029,6 +1032,11 @@ function seatPlace_(settings, seat) {
     start += t.seats;
   }
   return { table: null, num: seat };
+}
+
+/* 固定席の方の卓。今の卓の一覧に無い卓（シートで書き換えた・卓の設定が変わった）は「未設定」として扱います */
+function fixedTable_(st, p) {
+  return p.kind === 'fixed' && p.table && st.tables.some(function (t) { return t.name === p.table; }) ? p.table : null;
 }
 
 function fixedLabels_(db) {
@@ -1054,7 +1062,7 @@ function participantView_(db, p) {
     kind: p.kind,
     seat: p.seat,
     // 卓があるときの表示：「A卓 3番」（固定席の方は、幹事が指定した卓）
-    table: p.kind === 'fixed' ? (p.table || null) : seatPlace_(st, p.seat).table,
+    table: p.kind === 'fixed' ? fixedTable_(st, p) : seatPlace_(st, p.seat).table,
     tableSeat: p.kind === 'fixed' ? null : seatPlace_(st, p.seat).num,
     tables: st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }),
     fixedLabel: p.kind === 'fixed' ? fixedLabels_(db)[p.id] : null,
@@ -1099,7 +1107,7 @@ function adminState_(db) {
       joinOpen: st.joinOpen, joinUrl: appUrl_(st) && st.joinCode ? appUrl_(st) + '?j=' + st.joinCode : '',
       devUrl: !st.baseUrl && isDevUrl_(rawServiceUrl_()) /* 自動で取れた URL がテスト用（/dev）だった */ },
     people: db.people.map(function (p) {
-      const place = p.kind === 'fixed' ? { table: p.table || null, num: null } : seatPlace_(st, p.seat);
+      const place = p.kind === 'fixed' ? { table: fixedTable_(st, p), num: null } : seatPlace_(st, p.seat);
       return { id: p.id, token: p.token, name: p.name, kind: p.kind, seat: p.seat, table: place.table, tableSeat: place.num, drink: p.drink, drawnAt: p.drawnAt, drinkAt: p.drinkAt, claimedAt: p.claimedAt, fixedLabel: labels[p.id] || null };
     }),
     summary: summary_(db),

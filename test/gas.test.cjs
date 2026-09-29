@@ -1632,5 +1632,35 @@ test('卓: 設定シートを手で壊しても、卓なしとして動く', () 
   assert.ok(v.seat >= 1);
 });
 
+
+test('卓 回帰: 設定シートに合計99席を超える卓を直接書いても、100番以降の席は配らない', () => {
+  const { ctx, add, admin } = fresh();
+  admin('adminSaveSettings', { tables: 'A 5' });
+  const sh = ctx.__mock.sheet('設定'), r = sh._dump().findIndex(x => x[0] === 'tables') + 1;
+  sh.getRange(r, 2).setValue('A 50\nB 50\nC 50');
+  add(range(120));
+  const st = admin('adminDrawAll').state;
+  assert.ok(st.settings.seats <= 99);
+  assert.ok(st.people.every(p => p.seat === null || p.seat <= 99));
+});
+
+test('卓 回帰: シートの「固定（Ａ卓）」（全角）も A卓 として読み、今の卓にない卓は未設定として見せる', () => {
+  const { ctx, add, admin, call, byName } = fresh();
+  admin('adminSaveSettings', { tables: 'A卓 8\nB卓 8' });
+  add(['部長'], 'fixed');
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(2, 4).setValue('固定（Ａ卓）');
+  assert.equal(byName('部長').table, 'A卓');
+  sh.getRange(2, 4).setValue('固定（Z卓）');
+  assert.equal(byName('部長').table, null);
+  assert.equal(call('participantGet', byName('部長').token).table, null);
+});
+
+test('卓 回帰: 小数・マイナスの席数は「読み取れません」', () => {
+  const { admin } = fresh();
+  for (const t of ['A卓 8.5', 'A卓 -3', 'A卓 1,000']) throwsMsg(() => admin('adminSaveSettings', { tables: t }), /読み取れません/, t);
+  assert.deepEqual(admin('adminSaveSettings', { tables: 'テーブル1 8' }).settings.tables, [{ name: 'テーブル1', seats: 8 }]);
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
