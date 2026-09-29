@@ -811,6 +811,90 @@ async function step(name, fn) {
       await pg.context().close();
     });
 
+    await step('13) 卓分け：卓を設定→参加者は「A卓 3番」→固定席の卓指定→卓ごとの配膳（画面・印刷・CSV）', async () => {
+      const pg = await newPage(browser, 'tables-admin', { width: 1280, height: 900 });
+      await pg.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      assert.equal(await pg.locator('#tablesummary').isHidden(), true, '卓が無いときは卓ごとの配膳は出ない');
+      await pg.click('#tab-setup');
+      await pg.fill('#tables', 'A卓 10\nB卓 10\nC卓：10');
+      await pg.click('#tablessave');
+      await waitStatus(pg, /卓の設定を保存しました/);
+      assert.equal(await pg.inputValue('#tables'), 'A卓 10\nB卓 10\nC卓 10', '整えた形で表示');
+      assert.equal(await pg.locator('#seats').isDisabled(), true, '席数は卓の合計になるので入力できない');
+      assert.match(await text(pg, '#tablesstate'), /3卓・合計 30席/);
+      assert.deepEqual(state().settings.tables.map(t => t.name), ['A卓', 'B卓', 'C卓']);
+      // 固定席の方の卓を修正画面で指定
+      await pg.locator('#roster tr', { hasText: FIXED }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#edittablewrap').waitFor({ state: 'visible' });
+      await pg.selectOption('#edittable', 'B卓');
+      await pg.click('#editform button[type=submit]');
+      await waitStatus(pg, /修正しました/);
+      assert.equal(state().people.find(p => p.name === FIXED).table, 'B卓');
+      // 参加者：くじで「◯卓 ◯番」
+      callServer(ctx, 'adminAddPeople', [KEY, ['卓 太郎'], 'lottery']);
+      const tp = state().people.find(p => p.name === '卓 太郎');
+      const ph = await newPage(browser, 'tables-phone', { width: 390, height: 844 });
+      await open(ph, { t: tp.token });
+      await ph.locator('#draw').waitFor({ state: 'visible' });
+      await ph.click('#draw');
+      await ph.waitForTimeout(400);
+      assert.match(await text(ph, '#tablename'), /^[ABC]卓$/, '演出中も卓の名前が回る');
+      await ph.locator('#resulthint').waitFor({ state: 'visible' });
+      const me = state().people.find(p => p.name === '卓 太郎');
+      assert.equal(await text(ph, '#tablename'), me.table);
+      assert.equal((await text(ph, '#number')).replace(/\s/g, ''), me.tableSeat + '番');
+      assert.equal(await ph.locator('#announce').textContent(), '卓 太郎 さんのお席は ' + me.table + ' ' + me.tableSeat + '番 です。');
+      await ph.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await ph.locator('#drinkmsg.ok').waitFor();
+      await noHScroll(ph, 'tables phone');
+      await shot(ph, 'participant-table');
+      // 固定席の方のスマホ：「お席：B卓」
+      const fx = await newPage(browser, 'tables-fixed', { width: 390, height: 844 });
+      await open(fx, { t: state().people.find(p => p.name === FIXED).token });
+      await fx.locator('#fixedtable').filter({ hasText: 'お席：B卓' }).waitFor();
+      // 幹事：卓ごとの配膳
+      await pg.click('#tab-drinks');
+      await pg.click('#refresh'); await waitStatus(pg, /最新の状態/);
+      await pg.locator('#tablesummary').waitFor({ state: 'visible' });
+      const card = pg.locator('.tcard', { has: pg.locator('h4', { hasText: me.table }) });
+      assert.match(await card.innerText(), /ビール \d+/);
+      assert.match(await card.innerText(), /卓 太郎/);
+      const bcard = pg.locator('.tcard', { has: pg.locator('h4', { hasText: 'B卓' }) });
+      assert.match(await bcard.innerText(), new RegExp(FIXED));
+      // 表の数字とサーバーの状態が一致
+      const st = state();
+      for (const t of st.settings.tables) {
+        const inT = st.people.filter(p => p.table === t.name);
+        const beer = inT.filter(p => p.drink === 'ビール').length;
+        const txt = await pg.locator('.tcard', { has: pg.locator('h4', { hasText: t.name }) }).innerText();
+        if (beer) assert.match(txt, new RegExp('ビール ' + beer + '(\\D|$)'), t.name + ' のビール数');
+        assert.match(txt, new RegExp(inT.length + ' / ' + t.seats + '席'));
+      }
+      assert.match(await text(pg, '#drinkrows'), new RegExp(me.table + ' ' + me.tableSeat + '番'));
+      await shot(pg, 'admin-tables');
+      // 検索「a卓」で A卓の方だけ
+      await pg.fill('#drinksearch', 'a卓');
+      const shownSeats = await pg.locator('#drinkrows td.seat').allInnerTexts();
+      assert.ok(shownSeats.length && shownSeats.every(x => /A卓/.test(x)), shownSeats.join(','));
+      await pg.fill('#drinksearch', '');
+      // 印刷：卓ごとの配膳表
+      await pg.click('#tableprint');
+      assert.equal(await pg.evaluate(() => window.__printed), 1);
+      assert.equal(await pg.locator('#printsheet').getAttribute('class'), 'tables');
+      assert.ok((await pg.locator('#printsheet .tsec').count()) >= 3);
+      // CSV に卓の列
+      const [dl] = await Promise.all([pg.waitForEvent('download'), pg.click('#csv')]);
+      const csv = fs.readFileSync(await dl.path(), 'utf8');
+      assert.match(csv.split('\r\n')[0], /"卓","卓内の席","席番号"/);
+      assert.ok(csv.includes('"' + me.table + '","' + me.tableSeat + '"'));
+      // スマホ幅でもはみ出さない
+      await pg.setViewportSize({ width: 360, height: 740 });
+      await noHScroll(pg, 'admin tables 360');
+      for (const c of [pg, ph, fx]) await c.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });

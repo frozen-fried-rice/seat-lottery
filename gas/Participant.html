@@ -15,6 +15,9 @@ button:disabled{cursor:default;opacity:.55}
 .primary{background:#2255aa;color:#fff;font-size:20px;min-height:66px;width:100%;box-shadow:0 6px 14px #2255aa26}
 .primary:active:not(:disabled){transform:translateY(1px)}
 .number{font-size:110px;line-height:1.1;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.05em;color:#193961;margin:10px 0 4px;min-height:124px;display:flex;align-items:center;justify-content:center;gap:4px}
+.tablename{font-size:40px;font-weight:800;color:#193961;margin:12px 0 -6px;line-height:1.2;overflow-wrap:anywhere}
+.tablename.rolling{color:#8fa3bf}
+.fixedtable{font-size:34px;font-weight:800;color:#193961;margin:4px 0 0;overflow-wrap:anywhere}
 .number small{font-size:26px;letter-spacing:0;font-weight:700}
 .rolling{color:#8fa3bf}
 .pop{animation:pop .45s ease-out}
@@ -73,9 +76,10 @@ button:disabled{cursor:default;opacity:.55}
  <div id="result" hidden>
   <p class="event" data-ev></p>
   <p class="who" id="name2" tabindex="-1"></p>
+  <p class="tablename" id="tablename" hidden></p>
   <div class="number" id="number"></div>
   <p class="sr" id="announce" role="status"></p>
-  <p class="hint" id="resulthint" hidden>テーブルの番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
+  <p class="hint" id="resulthint" hidden>卓と席の番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
   <button class="again" id="again" hidden>もう一度演出を見る</button>
  </div>
  <div id="join" hidden>
@@ -102,6 +106,7 @@ button:disabled{cursor:default;opacity:.55}
  <div id="fixed" hidden>
   <p class="event" data-ev></p>
   <h1 id="fixedname" tabindex="-1"></h1>
+  <p class="fixedtable" id="fixedtable" hidden></p>
   <p class="lead">お席はご案内します。<br>くじを引く必要はありません。</p>
  </div>
 </main>
@@ -211,7 +216,15 @@ function setCommon(v){
  const f=$('fixedname');f.replaceChildren(document.createTextNode(v.name+' さんは '));
  const tag=document.createElement('span');tag.className='fixedtag';tag.textContent='固定席';
  f.append(tag,document.createTextNode(' です'));
+ const ft=$('fixedtable');ft.hidden=!(v.kind==='fixed'&&v.table);ft.textContent=v.table?'お席：'+v.table:'';
 }
+// 卓の名前（「A卓」など）。卓を使っていないときは出しません
+function showTable(name,isRolling){
+ const t=$('tablename');t.hidden=!name;t.textContent=name||'';
+ t.className='tablename'+(isRolling?' rolling':'');
+ if(isRolling)t.setAttribute('aria-hidden','true');else t.removeAttribute('aria-hidden');
+}
+function seatWords(v){return v.table?v.table+' '+v.tableSeat+'番':v.seat+'番';}
 function showNumber(text,isRolling){
  const n=$('number');
  // くるくる回っている数字は読み上げません（結果だけを #announce で知らせます）
@@ -227,13 +240,18 @@ function stopRoll(){
 function startRoll(top){
  stopRoll();$('announce').textContent='抽選しています';
  top=Math.max(top||0,20);
- const tick=()=>showNumber(String(1+Math.floor(Math.random()*top)),true);
+ const tables=(view&&view.tables)||[];
+ // 卓があるときは、卓の名前と卓の中の番号をくるくる回します
+ const tick=tables.length
+  ?()=>{const t=tables[Math.floor(Math.random()*tables.length)];showTable(t.name,true);showNumber(String(1+Math.floor(Math.random()*t.seats)),true);}
+  :()=>{showTable('',true);showNumber(String(1+Math.floor(Math.random()*top)),true);};
  tick();rolling=setInterval(tick,80);
 }
 function showSeat(v){
  stopRoll();show('result');
- showNumber(String(v.seat),false);
- $('announce').textContent=v.name+' さんのお席は '+v.seat+'番 です。';
+ showTable(v.table||'',false);
+ showNumber(String(v.table?v.tableSeat:v.seat),false);
+ $('announce').textContent=v.name+' さんのお席は '+seatWords(v)+' です。';
  $('resulthint').hidden=false;$('again').hidden=false;
 }
 
@@ -392,7 +410,7 @@ function replay(){
  if(!view||view.seat==null||rolling||drawing||shown!=='result')return;
  if(reduced()||document.hidden){showSeat(view);return;}
  $('again').hidden=true;
- startRoll(view.seat);
+ startRoll(view.tables&&view.tables.length?0:view.seat);
  const g=gen;
  replayTimer=setTimeout(()=>{replayTimer=null;if(g!==gen||!view)return;if(view.seat!=null&&shown==='result')showSeat(view);else render(view,true);},1500);
 }

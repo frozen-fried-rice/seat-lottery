@@ -73,7 +73,7 @@ td.muted,span.muted{color:#98a4b5}
 td.time{font-size:14px;color:#617087;font-variant-numeric:tabular-nums}
 td.act{text-align:right}
 td.act .actions{justify-content:flex-end;gap:6px}
-col.c-seat{width:84px}col.c-time{width:92px}col.c-act{width:88px}col.c-kind{width:92px}col.c-state{width:96px}col.c-qract{width:220px}col.c-drink{width:28%}
+col.c-seat{width:112px}col.c-time{width:92px}col.c-act{width:88px}col.c-kind{width:92px}col.c-state{width:96px}col.c-qract{width:220px}col.c-drink{width:28%}
 .tag{display:inline-block;font-size:12px;font-weight:700;padding:3px 9px;border-radius:999px;background:#eef3fa;color:#44566f;white-space:nowrap}
 .tag.ok{background:#e4f3ea;color:#256143}
 .tag.wait{background:#fff4dc;color:#7a5410}
@@ -116,6 +116,20 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
 #releasewrap,#clearseatwrap{white-space:normal;align-items:flex-start;line-height:1.6;padding-top:8px}
 #releasewrap input,#clearseatwrap input{margin-top:3px;flex:none}
 .hint,#status,dialog p,#errortext,.urlbox,.modebox{overflow-wrap:anywhere}
+.tablecards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+.tcard{background:#fff;border:1px solid #dfe6ef;border-radius:14px;padding:14px 16px}
+.tcard h4{margin:0 0 8px;font-size:18px;color:#193961;display:flex;justify-content:space-between;gap:8px;align-items:baseline;overflow-wrap:anywhere}
+.tcard h4 small{font-size:13px;color:#617087;font-weight:700;white-space:nowrap}
+.tcard .counts{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.tcard .cnt{background:#edf3fc;border-radius:999px;padding:4px 10px;font-size:14px;font-weight:700;color:#183659;overflow-wrap:anywhere}
+.tcard .cnt.warn{background:#fff4dc;color:#7a5410}
+.tcard ul{list-style:none;margin:0;padding:0;font-size:14px;line-height:1.7}
+.tcard li{display:flex;gap:8px;border-top:1px solid #eef2f7;padding:3px 0}
+.tcard li .s{min-width:3.2em;color:#617087;font-variant-numeric:tabular-nums}
+.tcard li .n{flex:1;overflow-wrap:anywhere}
+.tcard li .d{font-weight:700;overflow-wrap:anywhere;text-align:right}
+.tcard li .d.muted{font-weight:400}
+.tcard.extra{background:#fbfcfe;border-style:dashed}
 [hidden]{display:none!important}
 @media(max-width:860px){
  header{padding:14px 14px 8px}h1{font-size:19px}
@@ -155,6 +169,13 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
  .poster .qrcard .ev{font-size:20pt;font-weight:700;color:#193961;margin:0 0 4mm}
  .poster .qrcard .nm{font-size:30pt;margin:0 0 8mm}
  .poster .qrcard svg{width:120mm;height:120mm}
+ #printsheet.tables{display:block;padding:6mm}
+ .tables .tsec{break-inside:avoid;page-break-inside:avoid;border:1px solid #9aa8bb;border-radius:3mm;padding:4mm 5mm;margin:0 0 5mm}
+ .tables .tsec h2{font-size:16pt;margin:0 0 2mm;color:#000}
+ .tables .tsec .tot{font-size:12pt;font-weight:700;margin:0 0 3mm}
+ .tables .tsec table{width:100%;border-collapse:collapse;font-size:11pt}
+ .tables .tsec td{border-top:1px solid #ccd;padding:1.2mm 2mm}
+ .tables .ev{font-size:11pt;margin:0 0 4mm;color:#333}
  .poster .qrcard .note{font-size:15pt;margin:8mm 0 0;line-height:1.8;white-space:pre-line}
 }
 </style></head><body>
@@ -188,6 +209,11 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
    <h3>1杯目のドリンク集計</h3>
    <div id="drinkcounts" class="drinkcounts"></div>
    <p id="drinktotal" class="hint"></p>
+  </section>
+  <section class="summary" id="tablesummary" hidden aria-labelledby="tablesummaryh">
+   <div class="listhead" style="margin-bottom:10px"><h3 id="tablesummaryh" style="margin:0">卓ごとの配膳</h3><div class="actions"><button id="tableprint">卓ごとの配膳表を印刷</button></div></div>
+   <p class="hint" style="margin:0 0 10px">1杯目のドリンクを、どの卓に何杯お持ちすればよいかの一覧です。</p>
+   <div id="tablecards" class="tablecards"></div>
   </section>
   <div class="filters">
    <div><label for="drinksearch">お名前・席番号で絞り込み</label><input id="drinksearch" autocomplete="off" placeholder="例：やま／12"></div>
@@ -246,13 +272,21 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
     <h2>会の設定</h2>
     <label for="event">会の名前（任意・40文字まで。参加者の画面とQRカードに表示します）</label>
     <div class="row"><input id="event" class="setting" maxlength="40" autocomplete="off" placeholder="例：送別会"><button id="eventsave">保存</button></div>
-    <label for="seats">抽選する席の数（1〜99）</label>
+    <label for="seats">抽選する席の数（1〜99。卓を設定したときは自動で合計になります）</label>
     <div class="row"><input id="seats" class="setting" type="number" min="1" max="99" step="1" inputmode="numeric"><button id="seatssave">保存</button></div>
     <p class="hint" id="seatsstate"></p>
     <div class="switchrow" style="margin:14px 0 0">
      <div class="lbl">ドリンクの受付<small>オフにすると、参加者はドリンクを登録・変更できなくなります。</small></div>
      <button class="switch drinkopen" role="switch" aria-checked="false"><span class="knob" aria-hidden="true"></span><span class="swtext">—</span></button>
     </div>
+   </div>
+   <div class="panel">
+    <h2>卓の設定（任意）</h2>
+    <p class="hint">1行に1卓、「卓の名前 席数」で入力します。上の卓から順に席が割り振られ、参加者のスマホには「A卓 3番」のように表示されます。空にすると卓を使わず、通し番号（12番など）になります。</p>
+    <label for="tables">卓と席数</label>
+    <textarea id="tables" class="setting" rows="5" placeholder="A卓 8&#10;B卓 8&#10;C卓 6"></textarea>
+    <div class="actions" style="margin-top:10px"><button id="tablessave">卓を保存</button></div>
+    <p class="hint" id="tablesstate"></p>
    </div>
    <div class="panel">
     <h2>ドリンクメニュー</h2>
@@ -306,6 +340,7 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
  <label for="editkind">区分</label>
  <select id="editkind"><option value="lottery">くじを引く（抽選席）</option><option value="fixed">くじを引かない（固定席）</option></select>
  <p class="hint" id="editkindhint"></p>
+ <div id="edittablewrap" hidden><label for="edittable">卓（固定席の方）</label><select id="edittable"></select></div>
  <label for="editdrink">1杯目のドリンク</label>
  <select id="editdrink"></select>
  <div id="editotherwrap" hidden><label for="editother">ドリンク名（30文字まで）</label><input id="editother" maxlength="30" autocomplete="off" placeholder="例：ジンジャーエール"></div>
@@ -595,19 +630,29 @@ $('askdialog').addEventListener('close',()=>askDone(false));
 
 /* データの見せ方 */
 function person(id){return S?S.people.find(p=>p.id===id)||null:null;}
-function seatText(p){return p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未':p.seat+'番';}
-function stateText(p){return p.kind==='fixed'?'固定席':p.seat==null?'未抽選':p.seat+'番';}
+function placeText(p){return p.table?p.table+' '+p.tableSeat+'番':p.seat+'番';}
+function seatText(p){return p.kind==='fixed'?(p.table?'固定（'+p.table+'）':(p.fixedLabel||'固定席')):p.seat==null?'未':placeText(p);}
+function stateText(p){return p.kind==='fixed'?(p.table?'固定席（'+p.table+'）':'固定席'):p.seat==null?'未抽選':placeText(p);}
+function hasTables(){return !!(S&&S.settings.tables&&S.settings.tables.length);}
 function drinkText(p){return p.drink?p.drink:'未登録';}
 function timeText(t){if(!t)return '';const m=String(t).match(/(\d{1,2}:\d{2})(:\d{2})?/);return m?m[1]:String(t);}
 function linkFor(p){const u=S&&S.settings.appUrl;return u&&p.token?u+(u.includes('?')?'&':'?')+'t='+encodeURIComponent(p.token):'';}
-function sortKey(p,i){return p.kind==='fixed'?2000+i:p.seat==null?1000+i:p.seat;}
+// 並び順：席番号順。卓のある固定席の方は、その卓の最後に並べます
+function sortKey(p,i){
+ if(p.kind==='fixed'){
+  if(p.table&&hasTables()){let end=0;for(const t of S.settings.tables){end+=t.seats;if(t.name===p.table)return end+0.5+i/10000;}}
+  return 2000+i;
+ }
+ return p.seat==null?1000+i:p.seat;
+}
 function sorted(people){return people.map((p,i)=>[p,sortKey(p,i)]).sort((a,b)=>a[1]-b[1]).map(x=>x[0]);}
 // 絞り込み用：空白を無視し、カタカナはひらがなに、英字は小文字にそろえます
 function norm(t){return clean(t).replace(/\s/g,'').toLowerCase().replace(/[\u30a1-\u30f6]/g,c=>String.fromCharCode(c.charCodeAt(0)-0x60));}
 function matcher(q){
  q=norm(q).replace(/番$/,'');
  if(!q)return ()=>true;
- return p=>norm(p.name).includes(q)||(p.seat!=null&&String(p.seat)===q)||(!!p.fixedLabel&&norm(p.fixedLabel).includes(q));
+ return p=>norm(p.name).includes(q)||(p.seat!=null&&String(p.seat)===q)||(!!p.fixedLabel&&norm(p.fixedLabel).includes(q))
+  ||(!!p.table&&(norm(p.table)===q||norm(p.table).startsWith(q)||(p.tableSeat!=null&&norm(p.table+p.tableSeat)===q)));
 }
 function table(cols,heads,rows,cls){
  const t=el('table',{class:cls||null});
@@ -660,7 +705,40 @@ function renderUpdated(){
  $('updatedtext').textContent='最終更新 '+(S.updatedAt?String(S.updatedAt).replace(/^\d{4}\/\d{2}\/\d{2}\s*/,''):new Date(lastLoad).toLocaleTimeString('ja-JP'))+(paused?'（自動更新は停止中）':'');
 }
 
+/* 卓ごとの配膳：卓ごとに、だれが何を飲むか・ドリンクごとの杯数 */
+function tableGroups(){
+ const menu=S.settings.drinks||[];
+ const groups=S.settings.tables.map(t=>({name:t.name,seats:t.seats,people:[],extra:false}));
+ const by=Object.create(null);groups.forEach(g=>{by[g.name]=g;});
+ const noseat={name:'まだ席が決まっていない方',people:[],extra:true},notable={name:'卓が決まっていない固定席の方',people:[],extra:true};
+ for(const p of sorted(S.people)){
+  const g=p.table&&by[p.table]?by[p.table]:p.kind==='fixed'?notable:noseat;
+  g.people.push(p);
+ }
+ for(const g of groups.concat([noseat,notable])){
+  const c=new Map();menu.forEach(d=>c.set(d,0));let und=0,none=0;
+  for(const p of g.people){if(!p.drink)none++;else if(p.drink==='未定')und++;else c.set(p.drink,(c.get(p.drink)||0)+1);}
+  g.counts=[...c].filter(x=>x[1]>0);g.undecided=und;g.none=none;
+ }
+ return groups.concat([noseat,notable].filter(g=>g.people.length));
+}
+function renderTables(){
+ const on=hasTables();$('tablesummary').hidden=!on;
+ if(!on)return;
+ const root=$('tablecards');root.replaceChildren();
+ for(const g of tableGroups()){
+  const counts=el('div',{class:'counts'});
+  for(const [d,n] of g.counts)counts.append(el('span',{class:'cnt',text:d+' '+n}));
+  if(g.undecided)counts.append(el('span',{class:'cnt warn',text:'未定 '+g.undecided}));
+  if(g.none)counts.append(el('span',{class:'cnt warn',text:'未登録 '+g.none}));
+  if(!g.people.length)counts.append(el('span',{class:'cnt',text:'まだだれもいません'}));
+  const ul=el('ul');
+  for(const p of g.people)ul.append(el('li',null,el('span',{class:'s',text:p.kind==='fixed'?'固定':p.tableSeat!=null&&!g.extra?p.tableSeat+'番':'—'}),el('span',{class:'n',text:p.name}),el('span',{class:'d'+(p.drink?'':' muted'),text:drinkText(p)})));
+  root.append(el('div',{class:'tcard'+(g.extra?' extra':'')},el('h4',null,el('span',{text:g.name}),el('small',{text:g.extra?g.people.length+'人':g.people.length+' / '+g.seats+'席'})),counts,ul));
+ }
+}
 function renderDrinks(){
+ renderTables();
  const sm=S.summary,root=$('drinkcounts');root.replaceChildren();
  for(const o of sm.orders)root.append(el('div',{class:'drinkcount'+(o.count?'':' zero')},el('span',{text:o.name}),el('strong',null,String(o.count),el('small',{text:'杯'}))));
  root.append(el('div',{class:'drinkcount meta'},el('span',{text:'未定'}),el('strong',null,String(sm.undecided),el('small',{text:'人'}))));
@@ -722,9 +800,9 @@ function renderQr(){
   const acts=el('div',{class:'actions'},
    el('button',{class:'small',text:'QR表示',disabled:!st.appUrl,'data-fk':'q:show:'+p.id,'aria-label':p.name+'さんのQRコードを表示',onclick:()=>openQr(p.id)}),
    p.kind==='lottery'&&p.seat==null?el('button',{class:'small',text:'代わりに引く','data-fk':'q:draw:'+p.id,'aria-label':p.name+'さんの代わりにくじを引く',disabled:!sm.seatsLeft,onclick:()=>drawOne(p.id)}):null);
-  const tag=p.kind==='fixed'?el('span',{class:'tag',text:'固定席'}):p.seat==null?el('span',{class:'tag wait',text:'未抽選'}):el('span',{class:'tag ok',text:p.seat+'番'});
+  const tag=p.kind==='fixed'?el('span',{class:'tag',text:stateText(p)}):p.seat==null?el('span',{class:'tag wait',text:'未抽選'}):el('span',{class:'tag ok',text:placeText(p)});
   return el('tr',null,
-   el('td',{class:'seat hide-sm'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:p.kind==='fixed'?(p.fixedLabel||'—'):p.seat==null?'—':String(p.seat)}),
+   el('td',{class:'seat hide-sm'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:p.kind==='fixed'?(p.table||p.fixedLabel||'—'):p.seat==null?'—':(p.table?p.table+' '+p.tableSeat:String(p.seat))}),
    el('td',{text:p.name}),
    el('td',null,tag,p.claimedAt?el('span',{class:'tag ok',text:'受付済み',title:'受付：'+p.claimedAt,style:'margin-left:4px'}):null),
    el('td',{class:(p.drink?'':'muted ')+'hide-sm',text:drinkText(p)}),
@@ -734,8 +812,8 @@ function renderQr(){
 }
 
 /* 設定欄：入力中・未保存のものは上書きしない */
-const settingFields={event:()=>S.settings.event||'',seats:()=>String(S.settings.seats),drinks:()=>(S.settings.drinks||[]).join('\n'),baseurl:()=>S.settings.baseUrl||''};
-const saveBtn={event:'eventsave',seats:'seatssave',drinks:'drinkssave',baseurl:'baseurlsave'};
+const settingFields={tables:()=>(S.settings.tables||[]).map(t=>t.name+' '+t.seats).join('\n'),event:()=>S.settings.event||'',seats:()=>String(S.settings.seats),drinks:()=>(S.settings.drinks||[]).join('\n'),baseurl:()=>S.settings.baseUrl||''};
+const saveBtn={tables:'tablessave',event:'eventsave',seats:'seatssave',drinks:'drinkssave',baseurl:'baseurlsave'};
 for(const id in settingFields)$(id).addEventListener('input',()=>{$(id).dataset.dirty='1';$(saveBtn[id]).classList.add('dirty');});
 function syncField(id,force){
  const f=$(id);
@@ -747,6 +825,8 @@ function renderSetup(){
  for(const id in settingFields)syncField(id,false);
  const maxSeat=S.people.reduce((m,p)=>p.seat!=null?Math.max(m,p.seat):m,0);
  $('seatsstate').textContent='いまの設定：抽選席 '+st.seats+'席（決まっている席 '+sm.seated+'席'+(maxSeat?'・最大 '+maxSeat+'番':'')+'）／ 固定席 '+sm.fixed+'人';
+ const tb=hasTables();$('seats').disabled=tb;$('seatssave').disabled=tb;
+ $('tablesstate').textContent=tb?'いまの設定：'+st.tables.length+'卓・合計 '+st.seats+'席（'+st.tables.map(t=>t.name+' '+t.seats+'席').join('、')+'）':'いまは卓を使っていません（席は通し番号です）。';
  $('appurl').textContent=st.appUrl?'QRに使うURL：'+st.appUrl:st.devUrl?'テスト用のURL（/dev）は参加者が開けないため使えません。/exec で終わるURLを下に入力してください。':'QRに使うURLがまだありません（Webアプリとしてデプロイしてください）。';
  $('rostercount').textContent='名簿 '+sm.total+'人（抽選席 '+sm.lottery+'人・固定席 '+sm.fixed+'人）';
  const box=$('roster');
@@ -754,7 +834,7 @@ function renderSetup(){
  const rows=S.people.map(p=>el('tr',null,
   el('td',{text:p.name}),
   el('td',null,el('span',{class:'tag',text:p.kind==='fixed'?'固定席':'抽選席'})),
-  el('td',{class:p.seat==null&&p.kind!=='fixed'?'muted':null,text:p.kind==='fixed'?(p.fixedLabel||'—'):p.seat==null?'未抽選':p.seat+'番'}),
+  el('td',{class:p.seat==null&&p.kind!=='fixed'?'muted':null,text:p.kind==='fixed'?(p.table||p.fixedLabel||'—'):p.seat==null?'未抽選':placeText(p)}),
   el('td',{class:(p.drink?'':'muted ')+'hide-sm',text:drinkText(p)}),
   el('td',{class:'act'},el('button',{class:'small',text:'修正','aria-label':p.name+'さんを修正',onclick:()=>openEdit(p.id),'data-fk':'s:edit:'+p.id}))));
  box.replaceChildren(table(['c-name','c-kind','c-seat','c-drink hide-sm','c-act'],['お名前','区分','席','ドリンク','修正'],rows,'compact'));
@@ -776,6 +856,7 @@ function saveSetting(id,patch,msg){
  act('adminSaveSettings',[patch],()=>{if($(id).value===sent)syncField(id,true);qrCache.clear();ok(msg);});
 }
 $('eventsave').onclick=()=>{const v=tidy($('event').value);saveSetting('event',{event:v},v?'会の名前を保存しました。':'会の名前を消しました。');};
+$('tablessave').onclick=()=>{const v=$('tables').value;saveSetting('tables',{tables:v},v.trim()?'卓の設定を保存しました。':'卓の設定を消しました（通し番号に戻しました）。');};
 $('seatssave').onclick=()=>{const v=Number($('seats').value);saveSetting('seats',{seats:v},'抽選席を'+v+'席にしました。');};
 $('drinkssave').onclick=()=>{const v=$('drinks').value.split(/\r?\n/).map(s=>s.trim()).filter(Boolean);saveSetting('drinks',{drinks:v},'ドリンクメニューを保存しました。');};
 $('baseurlsave').onclick=()=>{const v=$('baseurl').value.trim();saveSetting('baseurl',{baseUrl:v},v?'QR用のURLを保存しました。':'QR用のURLを自動に戻しました。');};
@@ -817,7 +898,7 @@ $('drawall').onclick=async()=>{
 };
 
 /* 修正ダイアログ */
-const EDIT_FIELDS=['editname','editkind','editdrink','editother'];
+const EDIT_FIELDS=['editname','editkind','editdrink','editother','edittable'];
 function openEdit(id){
  const p=person(id);if(!p)return;
  editing={id,name:p.name,kind:p.kind,drink:p.drink||null,fk:lastFk};
@@ -831,7 +912,10 @@ function openEdit(id){
 /* 修正ダイアログに値を入れます。開いている間に最新の状態が届いたときは、まだ触っていない欄だけを最新にします */
 function fillEdit(p){
  const t=f=>!!$(f).dataset.touched;
- editing.name=p.name;editing.kind=p.kind;editing.drink=p.drink||null; // 変更の比較は最新の状態と行います
+ editing.name=p.name;editing.kind=p.kind;editing.drink=p.drink||null;editing.table=p.kind==='fixed'?(p.table||''):''; // 変更の比較は最新の状態と行います
+ const ts=$('edittable'),tsig=JSON.stringify(S.settings.tables||[]);
+ if(ts.dataset.sig!==tsig){ts.replaceChildren(el('option',{value:'',text:'未設定'}),...(S.settings.tables||[]).map(x=>el('option',{value:x.name,text:x.name})));ts.dataset.sig=tsig;}
+ if(!t('edittable'))ts.value=editing.table;
  $('edittitle').textContent=p.name+' さん';
  if(!t('editname'))$('editname').value=p.name;
  if(!t('editkind'))$('editkind').value=p.kind;
@@ -853,12 +937,14 @@ for(const f of EDIT_FIELDS)$(f).addEventListener('input',()=>{$(f).dataset.touch
 function toggleOther(){const o=$('editdrink').value==='other';$('editotherwrap').hidden=!o;$('editother').required=o;}
 function kindHint(){
  const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
+ $('edittablewrap').hidden=!(toFixed&&hasTables());
  $('editkindhint').textContent=p&&toFixed&&p.seat!=null?'固定席に変えると、'+p.seat+'番は空きに戻ります。':toFixed?'固定席の方はくじを引きません。ドリンクだけ登録できます。':'くじを引いて席を決める方です。';
  $('clearseatwrap').hidden=!(p&&p.kind==='lottery'&&p.seat!=null&&!toFixed);
  $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+p.seat+'番）を空きに戻す':'席を空きに戻す';
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
+$('edittable').onchange=()=>{$('edittable').dataset.touched='1';};
 $('editcancel').onclick=()=>$('editdialog').close();
 $('editform').onsubmit=e=>{
  e.preventDefault();
@@ -872,6 +958,7 @@ $('editform').onsubmit=e=>{
  if(drink!==editing.drink)patch.drink=drink;
  if($('editclearseat').checked&&!$('clearseatwrap').hidden)patch.clearSeat=true;
  if($('editrelease').checked&&!$('releasewrap').hidden)patch.releaseClaim=true;
+ if(!$('edittablewrap').hidden){const tv=$('edittable').value;if(tv!==editing.table||patch.kind==='fixed')patch.table=tv||null;}
  if(!Object.keys(patch).length){$('editdialog').close();return;}
  const id=editing.id;
  act('adminUpdatePerson',[id,patch],()=>{$('editdialog').close();ok(name+'さんを修正しました。');});
@@ -975,6 +1062,20 @@ $('joinprint').onclick=()=>{
  window.print();
 };
 
+/* 卓ごとの配膳表（A4に卓ごと） */
+$('tableprint').onclick=()=>{
+ if(!S||!hasTables())return;
+ const root=$('printsheet');root.replaceChildren();root.className='tables';
+ root.append(el('p',{class:'ev',text:(S.settings.event?S.settings.event+'　':'')+'1杯目のドリンク 卓ごとの配膳表（'+new Date().toLocaleString('ja-JP')+'）'}));
+ for(const g of tableGroups()){
+  const tot=g.counts.map(x=>x[0]+' '+x[1]).concat(g.undecided?['未定 '+g.undecided]:[],g.none?['未登録 '+g.none]:[]).join('　／　')||'（なし）';
+  const tb=el('table');
+  for(const p of g.people)tb.append(el('tr',null,el('td',{text:p.kind==='fixed'?'固定':p.tableSeat!=null&&!g.extra?p.tableSeat+'番':'—'}),el('td',{text:p.name}),el('td',{text:drinkText(p)})));
+  root.append(el('section',{class:'tsec'},el('h2',{text:g.name+(g.extra?'':'（'+g.people.length+' / '+g.seats+'席）')}),el('p',{class:'tot',text:tot}),tb));
+ }
+ window.print();
+};
+
 /* 印刷・CSV */
 $('printbtn').onclick=()=>{
  if(!S||!S.settings.appUrl)return;
@@ -1003,8 +1104,9 @@ function downloadCsv(rows,filename){
 }
 function stamp(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'-'+z(d.getHours())+z(d.getMinutes());}
 $('csv').onclick=()=>{
- const rows=[['席番号','区分','お名前','ドリンク','ドリンク登録時刻']];
- for(const p of sorted(S.people))rows.push([p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,p.drink||'未登録',p.drinkAt||'']);
+ const tb=hasTables();
+ const rows=[(tb?['卓','卓内の席']:[]).concat(['席番号','区分','お名前','ドリンク','ドリンク登録時刻'])];
+ for(const p of sorted(S.people))rows.push((tb?[p.table||(p.kind==='fixed'?'未設定':'未抽選'),p.kind==='fixed'?'固定':p.tableSeat==null?'':p.tableSeat]:[]).concat([p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,p.drink||'未登録',p.drinkAt||'']));
  downloadCsv(rows,'席くじ-ドリンク一覧-'+stamp()+'.csv');
  ok('CSVを保存しました。');
 };

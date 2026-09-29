@@ -9,6 +9,7 @@ const SHEET_PEOPLE_ = '参加者', SHEET_SETTINGS_ = '設定';
 const HEADERS_ = ['ID', 'トークン', 'お名前', '区分', '席番号', 'ドリンク', '抽選日時', 'ドリンク登録日時', '受付日時', '受付確認キー'];
 const COL_SEAT_ = 5; // 席番号の列（ここだけ数値。ほかの列は書式なしテキスト）
 const DEFAULT_DRINKS_ = ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'];
+const MAX_TABLES_ = 30, MAX_TABLE_NAME_ = 10;
 const DEFAULT_SEATS_ = 27, MAX_SEATS_ = 99, MAX_PEOPLE_ = 200, MAX_NAME_ = 60, MAX_DRINK_ = 30, MAX_DRINKS_ = 20, MAX_EVENT_ = 40, MAX_URL_ = 190; // QRコード（型番10・誤り訂正M）に入るのは213バイトまで。?t=＋合言葉20文字を足しても収まる長さ
 const UNDECIDED_ = '未定', TZ_ = 'Asia/Tokyo';
 const ERR_TOKEN_ = 'QRコードが無効です。受付にお声がけください。';
@@ -224,11 +225,22 @@ function adminUpdatePersonImpl_(key, id, patch) {
     if (patch.name !== undefined) p.name = checkName_(db, patch.name, p.id);
     if (patch.kind !== undefined) {
       checkKind_(patch.kind);
-      if (patch.kind !== p.kind) { p.kind = patch.kind; p.seat = null; p.drawnAt = null; }
+      if (patch.kind !== p.kind) { p.kind = patch.kind; p.seat = null; p.drawnAt = null; p.table = null; }
     }
     if (patch.drink !== undefined) {
       if (patch.drink === null) { p.drink = null; p.drinkAt = null; }
       else { p.drink = checkDrink_(patch.drink); p.drinkAt = now_(); }
+    }
+    if (patch.table !== undefined) {
+      // 固定席の方の卓（null で未設定）
+      if (p.kind !== 'fixed') throw appErr_('卓を指定できるのは固定席の方だけです（くじを引く方の卓は、くじで決まります）。');
+      if (patch.table === null || patch.table === '') p.table = null;
+      else {
+        const names = db.settings.tables.map(function (t) { return t.name; });
+        const t = typeof patch.table === 'string' ? tidy_(patch.table) : '';
+        if (names.indexOf(t) < 0) throw appErr_('その卓はありません。「名簿・設定」の卓の設定をご確認ください。');
+        p.table = t;
+      }
     }
     if (patch.clearSeat === true) { p.seat = null; p.drawnAt = null; }
     // 受付をやり直すときは、名前を選んだスマホ（間違えて選んだ人のスマホを含む）が使えなくなるよう合言葉も新しくします
@@ -285,10 +297,24 @@ function adminSaveSettingsImpl_(key, s) {
   if (!s || typeof s !== 'object') throw appErr_('変更する内容がありません。');
   return withLock_(function () {
     const db = load_(true), st = db.settings;
+    const maxSeat = db.people.concat(db.ghosts).reduce(function (m, p) { return p.seat !== null && p.seat > m ? p.seat : m; }, 0);
+    if (s.tables !== undefined) {
+      if (typeof s.tables !== 'string') throw appErr_('卓の設定を文字で入力してください。');
+      const tables = parseTables_(s.tables);
+      const total = tables.reduce(function (n, t) { return n + t.seats; }, 0);
+      if (tables.length && total > MAX_SEATS_) throw appErr_('席数の合計が' + total + '席です。合計' + MAX_SEATS_ + '席までにしてください。');
+      if (tables.length && total < maxSeat) throw appErr_('すでに' + maxSeat + '番（通し番号）の席が決まっているため、席数の合計を' + maxSeat + 'より少なくできません。');
+      st.tables = tables;
+      st.tablesRaw = tables.map(function (t) { return t.name + ' ' + t.seats; }).join('\n');
+      if (tables.length) st.seats = total;
+      // 固定席の方の卓が、新しい卓の一覧に無くなっていたら「未設定」に戻します
+      const names = tables.map(function (t) { return t.name; });
+      db.people.forEach(function (p) { if (p.kind === 'fixed' && p.table && names.indexOf(p.table) < 0) { p.table = null; db.dirty = true; } });
+    }
     if (s.seats !== undefined) {
+      if (st.tables.length) throw appErr_('卓を設定しているときは、抽選する席の数は各卓の席数の合計になります。卓の設定を変えてください。');
       const n = typeof s.seats === 'string' && s.seats.trim() ? Number(s.seats) : s.seats;
       if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > MAX_SEATS_) throw appErr_('抽選席数は1〜' + MAX_SEATS_ + 'の整数で入力してください。');
-      const maxSeat = db.people.concat(db.ghosts).reduce(function (m, p) { return p.seat !== null && p.seat > m ? p.seat : m; }, 0);
       if (n < maxSeat) throw appErr_('すでに' + maxSeat + '番の席が決まっているため、抽選席数を' + maxSeat + 'より少なくできません。');
       st.seats = n;
     }
@@ -609,7 +635,7 @@ function ensureSettings_(ss) {
   const fresh = !sh;
   if (!sh) sh = ss.insertSheet(SHEET_SETTINGS_);
   const rows = readKeyValues_(sh);
-  const defaults = { seats: String(DEFAULT_SEATS_), event: '', drinks: DEFAULT_DRINKS_.join('\n'), drinkOpen: 'TRUE', baseUrl: '', joinCode: randomString_(12), joinOpen: 'TRUE', sheetVersion: '2' };
+  const defaults = { seats: String(DEFAULT_SEATS_), event: '', drinks: DEFAULT_DRINKS_.join('\n'), drinkOpen: 'TRUE', baseUrl: '', joinCode: randomString_(12), joinOpen: 'TRUE', sheetVersion: '2', tables: '' };
   let changed = fresh;
   Object.keys(defaults).forEach(function (k) {
     if (!rows.some(function (r) { return r[0] === k; })) { rows.push([k, defaults[k]]); changed = true; }
@@ -665,8 +691,15 @@ function parseSettings_(rows) {
   const open = m.drinkOpen;
   const url = m.baseUrl === undefined || m.baseUrl === null ? '' : String(m.baseUrl).trim();
   const join = m.joinCode === undefined || m.joinCode === null ? '' : String(m.joinCode).trim();
+  const tablesRaw = m.tables === undefined || m.tables === null ? '' : String(m.tables);
+  let tables = [];
+  try { tables = parseTables_(tablesRaw); } catch (err) { tables = []; } // シートを手で壊した場合は、卓なし（通し番号）として扱います
+  const total = tables.reduce(function (n, t) { return n + t.seats; }, 0);
   return {
-    seats: Number.isInteger(seats) && seats >= 1 && seats <= MAX_SEATS_ ? seats : DEFAULT_SEATS_,
+    // 卓があるときは、抽選する席の数＝各卓の席数の合計です
+    seats: tables.length ? total : Number.isInteger(seats) && seats >= 1 && seats <= MAX_SEATS_ ? seats : DEFAULT_SEATS_,
+    tables: tables,
+    tablesRaw: tablesRaw,
     event: m.event === undefined || m.event === null ? '' : tidy_(m.event).slice(0, MAX_EVENT_),
     drinks: drinks,
     drinksRaw: drinksRaw, // メニューを変更しない保存では、シートの文字をそのまま書き戻します（21個目以降などを消さないため）
@@ -686,7 +719,7 @@ function readSettingsOnly_() {
 
 function saveSettings_(db) {
   const st = db.settings;
-  const vals = { seats: String(st.seats), event: st.event, drinks: st.drinksRaw, drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl,
+  const vals = { seats: String(st.seats), tables: st.tablesRaw || '', event: st.event, drinks: st.drinksRaw, drinkOpen: st.drinkOpen ? 'TRUE' : 'FALSE', baseUrl: st.baseUrl,
     joinCode: st.joinCode || randomString_(12), joinOpen: st.joinOpen ? 'TRUE' : 'FALSE' };
   st.joinCode = vals.joinCode;
   const rows = st.rows.map(function (r) { return [r[0], has_(vals, r[0]) ? vals[r[0]] : r[1], r[2]]; });
@@ -752,10 +785,12 @@ function load_(locked) {
     const ids = Object.create(null);
     named.forEach(function (x) {
       const r = x.r, id = cellText_(r[0]), token = cellText_(r[1]);
-      const kind = cellText_(r[3]) === '固定' || cellText_(r[3]) === 'fixed' ? 'fixed' : 'lottery';
+      // 区分の列：「抽選」「固定」または「固定（A卓）」（固定席の方の卓）
+      const km = /^(固定|fixed)(?:\s*[（(]\s*(.*?)\s*[）)])?$/.exec(cellText_(r[3]) || '');
+      const kind = km ? 'fixed' : 'lottery';
       const rawSeat = seatOf_(r[4]);
       const p = { id: id, token: token, name: x.name, kind: kind, seat: kind === 'lottery' ? rawSeat : null, drink: cellText_(r[5]), drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]),
-        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row, origId: id };
+        claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row, origId: id, table: km && km[2] ? tidy_(km[2]) : null };
       if ((rawSeat === null && r[4] !== '' && r[4] !== null) || (kind === 'fixed' && rawSeat !== null)) db.dirty = true;
       if (!p.id || ids[p.id]) { p.id = null; db.dirty = true; }
       if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokenCount[p.token] > 1) { p.token = null; p.claimedAt = null; p.claimKey = null; db.dirty = true; }
@@ -787,7 +822,7 @@ function seatOf_(v) {
 }
 
 function rowValues_(p) {
-  return [p.id, p.token, safeText_(p.name), p.kind === 'fixed' ? '固定' : '抽選', p.seat === null ? '' : p.seat, safeText_(p.drink || ''), p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
+  return [p.id, p.token, safeText_(p.name), p.kind === 'fixed' ? safeText_(p.table ? '固定（' + p.table + '）' : '固定') : '抽選', p.seat === null ? '' : p.seat, safeText_(p.drink || ''), p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
 }
 
 function ghostValues_(g) {
@@ -924,7 +959,7 @@ function newToken_(db) {
 }
 
 function newPerson_(db, name, kind) {
-  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, claimKey: null, row: 0, isNew: true };
+  return { id: newId_(db), token: newToken_(db), name: name, kind: kind, seat: null, drink: null, drawnAt: null, drinkAt: null, claimedAt: null, claimKey: null, row: 0, isNew: true, table: null };
 }
 
 function findByToken_(db, token) {
@@ -960,6 +995,42 @@ function drawFor_(db, p) {
   return true;
 }
 
+/*
+ * 卓の設定（1行に1卓「卓の名前 席数」）を読み取ります。例：
+ *   A卓 8
+ *   B卓 8
+ * 席の通し番号は、上の卓から順に割り振ります（A卓＝1〜8番、B卓＝9〜16番…）。
+ */
+function parseTables_(text) {
+  const out = [], seen = Object.create(null);
+  String(text).split(/\r?\n/).forEach(function (line, i) {
+    const l = clean_(line);
+    if (!l) return;
+    const m = /^(.+?)[\s,:、，：]*(\d+)\s*(?:席|人)?$/.exec(l);
+    if (!m || !tidy_(m[1].replace(/[,:、，：]+$/, ''))) throw appErr_((i + 1) + '行目「' + l.slice(0, 20) + '」を読み取れません。「A卓 8」のように、卓の名前と席数を書いてください。');
+    const name = tidy_(m[1].replace(/[,:、，：]+$/, '')), n = Number(m[2]);
+    if (name.length > MAX_TABLE_NAME_) throw appErr_('卓の名前「' + name.slice(0, 20) + '」は' + MAX_TABLE_NAME_ + '文字以内にしてください。');
+    if (!Number.isInteger(n) || n < 1 || n > MAX_SEATS_) throw appErr_('「' + name + '」の席数は1〜' + MAX_SEATS_ + 'の整数にしてください。');
+    if (seen[name]) throw appErr_('卓の名前「' + name + '」が重なっています。');
+    seen[name] = true;
+    out.push({ name: name, seats: n });
+  });
+  if (out.length > MAX_TABLES_) throw appErr_('卓は' + MAX_TABLES_ + '卓までです。');
+  return out;
+}
+
+/* 通し番号の席 → { table: 卓の名前, num: 卓の中での番号 }。卓が無いときは table: null */
+function seatPlace_(settings, seat) {
+  if (seat === null || seat === undefined) return { table: null, num: null };
+  let start = 0;
+  for (let i = 0; i < settings.tables.length; i++) {
+    const t = settings.tables[i];
+    if (seat <= start + t.seats) return { table: t.name, num: seat - start };
+    start += t.seats;
+  }
+  return { table: null, num: seat };
+}
+
 function fixedLabels_(db) {
   const m = Object.create(null);
   let i = 0;
@@ -982,6 +1053,10 @@ function participantView_(db, p) {
     name: p.name,
     kind: p.kind,
     seat: p.seat,
+    // 卓があるときの表示：「A卓 3番」（固定席の方は、幹事が指定した卓）
+    table: p.kind === 'fixed' ? (p.table || null) : seatPlace_(st, p.seat).table,
+    tableSeat: p.kind === 'fixed' ? null : seatPlace_(st, p.seat).num,
+    tables: st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }),
     fixedLabel: p.kind === 'fixed' ? fixedLabels_(db)[p.id] : null,
     drink: p.drink,
     drinks: st.drinks.slice(),
@@ -1020,11 +1095,12 @@ function summary_(db) {
 function adminState_(db) {
   const st = db.settings, labels = fixedLabels_(db);
   return {
-    settings: { seats: st.seats, event: st.event, drinks: st.drinks.slice(), drinkOpen: st.drinkOpen, baseUrl: st.baseUrl, appUrl: appUrl_(st),
+    settings: { seats: st.seats, tables: st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }), event: st.event, drinks: st.drinks.slice(), drinkOpen: st.drinkOpen, baseUrl: st.baseUrl, appUrl: appUrl_(st),
       joinOpen: st.joinOpen, joinUrl: appUrl_(st) && st.joinCode ? appUrl_(st) + '?j=' + st.joinCode : '',
       devUrl: !st.baseUrl && isDevUrl_(rawServiceUrl_()) /* 自動で取れた URL がテスト用（/dev）だった */ },
     people: db.people.map(function (p) {
-      return { id: p.id, token: p.token, name: p.name, kind: p.kind, seat: p.seat, drink: p.drink, drawnAt: p.drawnAt, drinkAt: p.drinkAt, claimedAt: p.claimedAt, fixedLabel: labels[p.id] || null };
+      const place = p.kind === 'fixed' ? { table: p.table || null, num: null } : seatPlace_(st, p.seat);
+      return { id: p.id, token: p.token, name: p.name, kind: p.kind, seat: p.seat, table: place.table, tableSeat: place.num, drink: p.drink, drawnAt: p.drawnAt, drinkAt: p.drinkAt, claimedAt: p.claimedAt, fixedLabel: labels[p.id] || null };
     }),
     summary: summary_(db),
     updatedAt: now_()

@@ -231,7 +231,7 @@ test('ID・トークン: 20文字の英数字で重複しない。参加者ビ�
   const chars = new Set(s.people.map(p => p.token).join(''));
   assert.ok(chars.size > 55, '英大文字・小文字・数字が混ざる: ' + chars.size);
   const v = call('participantGet', s.people[3].token);
-  assert.deepEqual(Object.keys(v).sort(), ['drink', 'drinkOpen', 'drinks', 'event', 'fixedLabel', 'kind', 'link', 'name', 'seat', 'seatsLeft'].sort());
+  assert.deepEqual(Object.keys(v).sort(), ['drink', 'drinkOpen', 'drinks', 'event', 'fixedLabel', 'kind', 'link', 'name', 'seat', 'seatsLeft', 'table', 'tableSeat', 'tables'].sort());
   assert.equal(v.name, '参加者4');
   assert.equal(v.link, 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + s.people[3].token, 'ご本人専用のリンク（ご本人のトークンのみ）');
   assert.equal(JSON.stringify({ ...v, link: '' }).includes(s.people[3].token), false);
@@ -250,7 +250,7 @@ test('participantGet: 不正なトークンはすべて同じエラー', () => {
     throwsMsg(() => ctx.participantSetDrink(bad, 'ビール'), ERR_TOKEN, String(bad));
   }
   const v = call('participantGet', tok);
-  assert.deepEqual(v, { event: '', name: '山田', kind: 'lottery', seat: null, fixedLabel: null, drink: null, drinks: ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'], drinkOpen: true, seatsLeft: 27, link: 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + tok });
+  assert.deepEqual(v, { event: '', name: '山田', kind: 'lottery', seat: null, fixedLabel: null, drink: null, drinks: ['ビール', 'ハイボール', 'レモンサワー', 'ウーロン茶', 'オレンジジュース', 'コーラ'], drinkOpen: true, seatsLeft: 27, table: null, tableSeat: null, tables: [], link: 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + tok });
 });
 
 /* ================= 抽選 ================= */
@@ -1554,6 +1554,82 @@ test('回帰4: 以前の版（8列）で見出しの無いメモがI列にあっ
   assert.equal(ctx.__mock.values('参加者')[1][10], 'ベジタリアン', 'メモは右へ移って残る');
   const code = joinCodeOf(admin('adminGetState'));
   assert.equal(call('joinClaim', code, byName('山田').id).view.name, '山田');
+});
+
+
+/* ================= 卓（テーブル）分け ================= */
+test('卓: 「A卓 8」形式で設定すると、席数は合計になり、通し番号が上の卓から割り振られる', () => {
+  const { admin, add, call } = fresh();
+  const st = admin('adminSaveSettings', { tables: 'A卓 3\nB卓：2\n\nC卓,4席\n' });
+  assert.deepEqual(st.settings.tables, [{ name: 'A卓', seats: 3 }, { name: 'B卓', seats: 2 }, { name: 'C卓', seats: 4 }]);
+  assert.equal(st.settings.seats, 9);
+  const ps = add(range(9)).state.people;
+  const seen = new Set();
+  ps.forEach(p => {
+    const v = call('participantDraw', p.token);
+    const want = v.seat <= 3 ? ['A卓', v.seat] : v.seat <= 5 ? ['B卓', v.seat - 3] : ['C卓', v.seat - 5];
+    assert.deepEqual([v.table, v.tableSeat], want);
+    seen.add(v.table + v.tableSeat);
+  });
+  assert.equal(seen.size, 9, '同じ卓・番号は重ならない');
+  const a = admin('adminGetState');
+  assert.ok(a.people.every(p => p.table && p.tableSeat));
+  assert.equal(a.summary.seatsLeft, 0);
+});
+
+test('卓: 設定の検証（読めない行・重複・席数・合計・決まっている席より少なく）', () => {
+  const { admin, add, call } = fresh();
+  throwsMsg(() => admin('adminSaveSettings', { tables: 'A卓' }), /1行目/);
+  throwsMsg(() => admin('adminSaveSettings', { tables: 'A卓 3\nA卓 4' }), /重なって/);
+  throwsMsg(() => admin('adminSaveSettings', { tables: 'A卓 0' }), /1〜99/);
+  throwsMsg(() => admin('adminSaveSettings', { tables: 'A卓 60\nB卓 60' }), /合計99席/);
+  throwsMsg(() => admin('adminSaveSettings', { tables: 'とても長い卓の名前です 3' }), /10文字/);
+  throwsMsg(() => admin('adminSaveSettings', { tables: ['A卓 3'] }), /文字で/);
+  admin('adminSaveSettings', { tables: 'A卓 5\nB卓 5' });
+  throwsMsg(() => admin('adminSaveSettings', { seats: 20 }), /卓を設定しているとき/);
+  const [p] = add(['X']).state.people;
+  admin('adminSaveSettings', { tables: 'A卓 1\nB卓 1' });
+  const seat = call('participantDraw', p.token).seat;
+  if (seat === 2) throwsMsg(() => admin('adminSaveSettings', { tables: 'A卓 1' }), /2番/);
+  // 空にすると卓なし（通し番号）に戻る。席数は最後の合計のまま
+  const st = admin('adminSaveSettings', { tables: '' });
+  assert.deepEqual(st.settings.tables, []);
+  assert.equal(st.settings.seats, 2);
+  assert.equal(call('participantGet', p.token).table, null);
+});
+
+test('卓: 固定席の方は幹事が卓を指定でき、区分の列に「固定（A卓）」と入る。卓の設定から消えたら未設定に戻る', () => {
+  const { ctx, admin, add, call, byName } = fresh();
+  admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
+  add(['部長'], 'fixed'); add(['山田']);
+  admin('adminUpdatePerson', byName('部長').id, { table: 'B卓' });
+  assert.equal(byName('部長').table, 'B卓');
+  assert.equal(call('participantGet', byName('部長').token).table, 'B卓');
+  assert.equal(ctx.__mock.values('参加者')[1][3], '固定（B卓）');
+  throwsMsg(() => admin('adminUpdatePerson', byName('部長').id, { table: 'Z卓' }), /その卓はありません/);
+  throwsMsg(() => admin('adminUpdatePerson', byName('山田').id, { table: 'A卓' }), /固定席の方だけ/);
+  // シートで手入力した「固定（A卓）」も読める
+  ctx.__mock.sheet('参加者').getRange(2, 4).setValue('固定(A卓)');
+  assert.equal(byName('部長').table, 'A卓');
+  admin('adminSaveSettings', { tables: 'B卓 4\nC卓 4' });
+  assert.equal(byName('部長').table, null, 'A卓が無くなったので未設定');
+  assert.equal(ctx.__mock.values('参加者')[1][3], '固定');
+  // 抽選に変えると卓は外れる
+  admin('adminUpdatePerson', byName('部長').id, { table: 'C卓' });
+  admin('adminUpdatePerson', byName('部長').id, { kind: 'lottery' });
+  assert.equal(byName('部長').table, null);
+  assert.equal(ctx.__mock.values('参加者')[1][3], '抽選');
+});
+
+test('卓: 設定シートを手で壊しても、卓なしとして動く', () => {
+  const { ctx, admin, add, call } = fresh();
+  admin('adminSaveSettings', { tables: 'A卓 4' });
+  const sh = ctx.__mock.sheet('設定'), r = sh._dump().findIndex(x => x[0] === 'tables') + 1;
+  sh.getRange(r, 2).setValue('こわれた行');
+  const [p] = add(['A']).state.people;
+  const v = call('participantDraw', p.token);
+  assert.equal(v.table, null);
+  assert.ok(v.seat >= 1);
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
