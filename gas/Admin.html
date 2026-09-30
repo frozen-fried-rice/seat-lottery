@@ -570,14 +570,14 @@ async function act(name,args,onOk){
   return r;
  }catch(e){errN=n;ok('');showError(e);if(e&&(e.timedOut||/ほかの画面で/.test(e.message)))setTimeout(()=>refresh(false,true),0);return null;} // 時間切れ・ほかの画面での変更のときは、最新の状態を読み直します
  finally{
-  acting--;busy--;setBusy();render();
+  acting--;busy--;lastActDone=n;setBusy();render();
   const a=document.activeElement;
   if(before&&before!==document.body&&before.isConnected&&!before.disabled&&!before.closest('[hidden]')&&(!a||a===document.body)&&(!before.closest('dialog')||before.closest('dialog').open))before.focus({preventScroll:true});
   if(!acting&&manualPending&&!refreshing){manualPending=false;refresh(true,true,true);} // 操作の途中で待たせていた「更新」を、操作の結果を出してから読みます（操作の結果の文・エラーの表示はそのまま）
  }
 }
 /* 自動・手動の読み込み */
-let refreshing=false,manualPending=false;
+let refreshing=false,manualPending=false,lastActDone=0;
 async function refresh(manual,keepError,quiet){
  if(refreshing){if(manual)manualPending=true;return;} // 自動更新の途中で「更新」を押したら、終わってからもう一度読みます
  if(busy&&!manual)return;
@@ -588,7 +588,7 @@ async function refresh(manual,keepError,quiet){
  finally{
   refreshing=false;if(manual){busy--;setBusy();}render();
   // 操作（保存など）の途中なら、操作が終わってから読みます（先に読むと、操作の結果より新しい番号の古い状態で、操作の結果を捨ててしまうため）
-  if(manualPending&&!acting){manualPending=false;refresh(true);}
+  if(manualPending&&!acting){manualPending=false;const q=lastActDone>n;refresh(true,q,q);} // 待つ間に終わった操作があれば、その結果の文・エラーを残します
  }
 }
 function dialogOpen(){return [...document.querySelectorAll('dialog')].some(d=>d.open);}

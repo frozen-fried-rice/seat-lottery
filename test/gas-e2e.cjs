@@ -1459,6 +1459,29 @@ async function step(name, fn) {
       }
     });
 
+    await step('最終確認4) 幹事画面：自動更新の途中に押した「更新」は、先に終わった操作の失敗・成功の文を消さない', async () => {
+      const label = 'dry4-admin';
+      const pg = await newPage(browser, label, { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows tr').first().waitFor();
+      const st = () => pg.evaluate(() => ({ status: document.getElementById('status').textContent, err: document.getElementById('error').hidden ? null : document.getElementById('errortext').textContent }));
+      for (const saveFails of [true, false]) {
+        faults.push({ label, name: 'adminGetState', mode: 'delay', ms: 900 }); // 自動更新が遅い
+        await pg.evaluate(() => { refresh(false); }); // eslint-disable-line no-undef
+        await pg.waitForTimeout(100);
+        await pg.click('#refresh'); // 自動更新の途中なので、待たせる
+        if (saveFails) faults.push({ label, name: 'adminSaveSettings', mode: 'fail', message: 'Error: テスト用の保存エラーです。' });
+        await pg.click('.drinkopen'); // 自動更新より先に終わる
+        await pg.waitForTimeout(2200);
+        const r = await st();
+        if (saveFails) { assert.equal(r.err, 'テスト用の保存エラーです。', JSON.stringify(r)); assert.equal(r.status, ''); }
+        else { assert.match(r.status, /ドリンクの受付を(締め切り|再開し)ました/, JSON.stringify(r)); assert.equal(r.err, null); }
+        await pg.evaluate(() => { hideError(); ok(''); }); // eslint-disable-line no-undef
+      }
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      await pg.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });
