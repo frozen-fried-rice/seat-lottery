@@ -1391,6 +1391,27 @@ async function step(name, fn) {
       await pg.context().close();
     });
 
+    await step('最終確認2) 幹事画面：失敗したときは前の「最新の状態にしました」を消す・エラー欄の「閉じる」が縦に割れない', async () => {
+      const pg = await newPage(browser, 'dry2-admin', { width: 360, height: 740 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows tr').first().waitFor();
+      await pg.click('#refresh');
+      await waitStatus(pg, /最新の状態にしました/);
+      const sh = ctx.__mock.sheet('参加者');
+      sh.insertRowsAfter(0, 1); // 見出しの上に行を差し込んだ
+      try {
+        await pg.click('#refresh');
+        await pg.waitForFunction(() => !document.getElementById('error').hidden);
+        assert.match(await text(pg, '#errortext'), /見出しの行/);
+        assert.equal(await text(pg, '#status'), '', '古い成功の文を残さない');
+        const box = await pg.locator('#errorclose').boundingBox();
+        assert.ok(box.width > box.height, '閉じるボタンが横長のまま: ' + JSON.stringify(box));
+      } finally { sh.deleteRows(1, 1); }
+      await pg.click('#refresh');
+      await waitStatus(pg, /最新の状態にしました/);
+      await pg.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });

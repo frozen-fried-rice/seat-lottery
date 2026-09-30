@@ -26,7 +26,7 @@ h1{font-size:22px;margin:0;letter-spacing:.06em}
 main{max-width:1180px;margin:8px auto 16px;padding:0 22px}
 .bars{position:sticky;top:0;z-index:5}
 #error{background:#fff0ec;color:#a02a18;border:1px solid #f3c4b8;padding:14px 16px;border-radius:12px;margin-bottom:12px;line-height:1.7;display:flex;gap:12px;align-items:flex-start;justify-content:space-between;box-shadow:0 6px 18px #a02a1814}
-#error button{background:transparent;color:#a02a18;min-height:32px;padding:4px 8px;font-size:14px}
+#error button{flex:none;white-space:nowrap;background:transparent;color:#a02a18;min-height:32px;padding:4px 8px;font-size:14px}
 #status{color:#286347;font-size:15px;font-weight:700;min-height:22px;margin:0 2px 10px;line-height:1.6}
 .warn{background:#fff8e6;border:1px solid #f0d79a;color:#7a5410;padding:14px 16px;border-radius:12px;margin-bottom:16px;font-size:15px;line-height:1.7}
 .panel{background:#fff;border:1px solid #dfe6ef;border-radius:20px;padding:24px;margin-bottom:18px;box-shadow:0 10px 35px #213a630a}
@@ -568,7 +568,7 @@ async function act(name,args,onOk){
   hideError();
   if(onOk)onOk(r);
   return r;
- }catch(e){errN=n;showError(e);if(e&&(e.timedOut||/ほかの画面で/.test(e.message)))setTimeout(()=>refresh(false,true),0);return null;} // 時間切れ・ほかの画面での変更のときは、最新の状態を読み直します
+ }catch(e){errN=n;ok('');showError(e);if(e&&(e.timedOut||/ほかの画面で/.test(e.message)))setTimeout(()=>refresh(false,true),0);return null;} // 時間切れ・ほかの画面での変更のときは、最新の状態を読み直します
  finally{
   acting--;busy--;setBusy();render();
   const a=document.activeElement;
@@ -584,7 +584,7 @@ async function refresh(manual,keepError,quiet){
  refreshing=true;const n=++seq;
  if(manual){busy++;setBusy();}
  try{const st=await api('adminGetState');if(applyState(st,n)&&n>errN){if(!keepError)$('error').hidden=true;if(manual&&!quiet)ok('最新の状態にしました。');}} // 修正・QRの画面の中のエラーは、その画面で次に保存するまで残します
- catch(e){if(n>=applied)showError(e,manual?'':'自動更新に失敗しました：');} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
+ catch(e){if(n>=applied){if(manual)ok('');showError(e,manual?'':'自動更新に失敗しました：');}} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
  finally{
   refreshing=false;if(manual){busy--;setBusy();}render();
   // 操作（保存など）の途中なら、操作が終わってから読みます（先に読むと、操作の結果より新しい番号の古い状態で、操作の結果を捨ててしまうため）
