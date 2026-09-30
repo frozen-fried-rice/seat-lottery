@@ -78,7 +78,7 @@ async function newPage(browser, label, viewport) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
   await context.exposeFunction('__gasCall', async (name, argsJson) => {
     calls.push({ label, name });
-    // 障害の再現：{ label?, name, mode: 'fail'（実行せず失敗）| 'lost'（実行したが返事が失われる）| 'hang'（返事が来ない）| 'delay' | 'delayfail'（待ってから失敗）, message?, ms? }
+    // 障害の再現：{ label?, name, mode: 'fail'（実行せず失敗）| 'lost'（実行したが返事が失われる）| 'hang'（返事が来ない）| 'delay' | 'delayfail'（待ってから失敗）| 'late'（実行してから返事が遅れる）, message?, ms? }
     const i = faults.findIndex(f => f.name === name && (!f.label || f.label === label));
     const f = i >= 0 ? faults.splice(i, 1)[0] : null;
     if (f && f.mode === 'fail') return { ok: false, message: f.message || 'NetworkError: Connection failure due to HTTP 0' };
@@ -87,6 +87,7 @@ async function newPage(browser, label, viewport) {
     if (f && f.mode === 'delayfail') { await new Promise(r => setTimeout(r, f.ms || 1500)); return { ok: false, message: 'NetworkError: Connection failure due to HTTP 0' }; }
     try {
       const result = callServer(ctx, name, JSON.parse(argsJson));
+      if (f && f.mode === 'late') await new Promise(r => setTimeout(r, f.ms || 1500)); // 読んだあと、返事だけ遅れる
       if (f && f.mode === 'lost') return { ok: false, message: f.message || 'NetworkError: Connection failure due to HTTP 0' };
       return { ok: true, result: result === undefined ? undefined : JSON.stringify(result) };
     } catch (e) { return { ok: false, message: e.message }; }
@@ -1497,6 +1498,29 @@ async function step(name, fn) {
       await pg.waitForTimeout(1600);
       assert.equal((await st()).err, 'テスト用の保存エラーです。');
       callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      await pg.context().close();
+    });
+
+    await step('最終確認6) 幹事画面：変更の衝突のあとの読み直しを、読み込み中・次の保存の途中でも捨てない', async () => {
+      const label = 'dry6-admin';
+      callServer(ctx, 'adminAddPeople', [KEY, ['衝突 一郎'], 'lottery']);
+      const who = byName('衝突 一郎'), menu = state().settings.drinks;
+      const pg = await newPage(browser, label, { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows tr', { hasText: '衝突 一郎' }).waitFor();
+      faults.push({ label, name: 'adminGetState', mode: 'late', ms: 2500 }); // 修正を開いたときの読み込みの返事が遅れる
+      await pg.locator('#drinkrows tr', { hasText: '衝突 一郎' }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#editdialog[open]').waitFor();
+      await pg.waitForTimeout(300);
+      callServer(ctx, 'participantSetDrink', [who.token, menu[0], '']); // その間に本人がドリンクを登録
+      await pg.selectOption('#editdrink', 'm:' + menu[1]);
+      await pg.click('#editform button[type=submit]');
+      await pg.waitForFunction(() => /ほかの画面で/.test(document.getElementById('editerror').textContent));
+      faults.push({ label, name: 'adminUpdatePerson', mode: 'delayfail', ms: 3000 });
+      await pg.selectOption('#editdrink', 'm:' + menu[2]);
+      await pg.click('#editform button[type=submit]');
+      await pg.waitForTimeout(4500);
+      assert.equal(await pg.evaluate(n => S.people.find(p => p.name === n).drink, '衝突 一郎'), menu[0], '読み直して本人の登録を表示'); // eslint-disable-line no-undef
       await pg.context().close();
     });
 
