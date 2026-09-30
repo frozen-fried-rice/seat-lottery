@@ -2270,6 +2270,19 @@ test('最終確認6: 個別QRの受付が多くても、J列を消して見出�
     sh.getRange(2, 9).setValue('○'); sh.getRange(3, 9).setValue('済');
     assert.equal(admin('adminGetState').people.length, 3);
   }
+  // I1 を「来場」に書き換えて、手で ○ や時刻を付けた（J1 はそのまま）
+  for (const mark of ['○', '19:05']) {
+    const { ctx, add, admin, call } = fresh();
+    const ps = add(['a', 'b', 'c', 'd', 'e', 'f']).state.people;
+    call('participantGet', ps[0].token);
+    const code = new URL(admin('adminGetState').settings.joinUrl).searchParams.get('j');
+    call('joinClaim', code, ps[1].id, 'Q'.repeat(20));
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 9).setValue('来場');
+    for (const r of [4, 5, 6]) sh.getRange(r, 9).setValue(mark);
+    assert.equal(admin('adminGetState').people.length, 6, mark);
+    assert.equal(call('participantGet', ps[2].token).name, 'c');
+  }
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);

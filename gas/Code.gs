@@ -630,6 +630,8 @@ function checkHeaderRow_(head, below, current) {
   // （見出しの無いメモの列が来たときは J1 が空になるので、A〜H列の見出しがそろっていれば空でも確かめます。I列・J列は別々に数えます）
   if (current && ((h1[8] && h1[8] !== HEADERS_[8]) || (h1[9] && h1[9] !== HEADERS_[9]) ||
       (!h1[9] && h1.slice(0, 8).every(function (v, c) { return v === HEADERS_[c]; })))) {
+    // I列がずれたなら J1 も変わっています（J1 が「受付確認キー」のまま・I1 が「受付日時」のままなら、I列は手で書いた印として通します）
+    const chkI = h1[8] !== HEADERS_[8] && h1[9] !== HEADERS_[9], chkJ = h1[9] !== HEADERS_[9];
     let nI = 0, bI = 0, nJ = 0, bJ = 0;
     below.forEach(function (r) {
       const h = cells(r);
@@ -637,7 +639,7 @@ function checkHeaderRow_(head, below, current) {
       if (h[8]) { nI++; if (!isDate(r[8])) bI++; }
       if (h[9]) { nJ++; if (!/^[A-Za-z0-9]{16,64}$/.test(h[9])) bJ++; }
     });
-    if ((bI && bI * 2 >= nI) || (bJ && bJ * 2 >= nJ)) throw appErr_(ERR_COLUMNS_);
+    if ((chkI && bI && bI * 2 >= nI) || (chkJ && bJ && bJ * 2 >= nJ)) throw appErr_(ERR_COLUMNS_);
   }
   if (pos(head) < 5) {
     let rows = 0, strong = 0, weak = 0;
