@@ -2248,5 +2248,29 @@ test('最終確認5: 受付確認キー（J列）・I〜J列を消して右の�
   }
 });
 
+test('最終確認6: 個別QRの受付が多くても、J列を消して見出しの無いメモが来たら止める／I列の見出しだけ消して手で印を付けても止めない', () => {
+  {
+    const { ctx, add, admin, call } = fresh();
+    const ps = add(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']).state.people;
+    for (const p of ps.slice(0, 4)) call('participantGet', p.token); // 個別QRで受付（I列だけ）
+    const code = new URL(admin('adminGetState').settings.joinUrl).searchParams.get('j');
+    call('joinClaim', code, ps[4].id, 'Q'.repeat(20));
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(6, 11).setValue('会費未'); sh.getRange(8, 11).setValue('遅れる');
+    sh.deleteColumns(10, 1);
+    const before = JSON.stringify(ctx.__mock.values('参加者'));
+    assert.throws(() => admin('adminGetState'), /列が追加・削除/);
+    assert.equal(JSON.stringify(ctx.__mock.values('参加者')), before);
+  }
+  {
+    const { ctx, add, admin } = fresh();
+    add(['a', 'b', 'c']);
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 9).setValue('');
+    sh.getRange(2, 9).setValue('○'); sh.getRange(3, 9).setValue('済');
+    assert.equal(admin('adminGetState').people.length, 3);
+  }
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

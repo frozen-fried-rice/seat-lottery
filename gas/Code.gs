@@ -627,17 +627,17 @@ function checkHeaderRow_(head, below, current) {
   if (below.some(function (r) { return pos(r) >= 3; })) throw appErr_(ERR_HEADER_);
   // 見出しがほとんど残っていないと、見出しからは列のずれが分かりません。アプリが書いた行（IDとトークンがある）の並びで確かめます
   // I・J列の見出しが違う：I・J列を消して右のメモの列が来ていないか（受付日時は日時、受付確認キーは英数字）
-  // （見出しの無いメモの列が来たときは I1・J1 が空になるので、A〜H列の見出しがそろっていれば空でも確かめます）
+  // （見出しの無いメモの列が来たときは J1 が空になるので、A〜H列の見出しがそろっていれば空でも確かめます。I列・J列は別々に数えます）
   if (current && ((h1[8] && h1[8] !== HEADERS_[8]) || (h1[9] && h1[9] !== HEADERS_[9]) ||
-      ((!h1[8] || !h1[9]) && h1.slice(0, 8).every(function (v, c) { return v === HEADERS_[c]; })))) {
-    let n = 0, bad = 0;
+      (!h1[9] && h1.slice(0, 8).every(function (v, c) { return v === HEADERS_[c]; })))) {
+    let nI = 0, bI = 0, nJ = 0, bJ = 0;
     below.forEach(function (r) {
       const h = cells(r);
-      if (!/^p[A-Za-z0-9]{10}$/.test(h[0]) || !/^[A-Za-z0-9]{20}$/.test(h[1]) || !(h[8] || h[9])) return;
-      n++;
-      if ((h[8] && !isDate(r[8])) || (h[9] && !/^[A-Za-z0-9]{16,64}$/.test(h[9]))) bad++;
+      if (!/^p[A-Za-z0-9]{10}$/.test(h[0]) || !/^[A-Za-z0-9]{20}$/.test(h[1])) return;
+      if (h[8]) { nI++; if (!isDate(r[8])) bI++; }
+      if (h[9]) { nJ++; if (!/^[A-Za-z0-9]{16,64}$/.test(h[9])) bJ++; }
     });
-    if (bad && bad * 2 >= n) throw appErr_(ERR_COLUMNS_);
+    if ((bI && bI * 2 >= nI) || (bJ && bJ * 2 >= nJ)) throw appErr_(ERR_COLUMNS_);
   }
   if (pos(head) < 5) {
     let rows = 0, strong = 0, weak = 0;
