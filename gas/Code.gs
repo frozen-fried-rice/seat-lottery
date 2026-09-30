@@ -16,6 +16,7 @@ const ERR_TOKEN_ = 'QRコードが無効です。受付にお声がけくださ�
 const ERR_KEY_ = '幹事用の合言葉が違います。';
 const ERR_NOSEAT_ = '空いている席がありません。受付にお声がけください。';
 const ERR_FIXED_ = '固定席の方はくじを引きません。';
+const ERR_HEADER_ = '「参加者」シートの見出しの行（ID・トークン・お名前…）が1行目にありません。行を消した・差し込んだ場合は元に戻し、見出しを1行目にしてください。';
 const ERR_COLUMNS_ = '「参加者」シートの列が追加・削除されています。A〜J列を元の並び（ID・トークン・お名前・区分・席番号・ドリンク・抽選日時・ドリンク登録日時・受付日時・受付確認キー）に戻し、足したい列はK列より右に作ってください。';
 const ERR_CLOSED_ = 'ドリンクの受付は締め切りました。受付にお声がけください。';
 const ERR_PERSON_ = '該当する方が見つかりません。画面を更新してから、もう一度お試しください。';
@@ -590,6 +591,9 @@ function spreadsheet_() {
 }
 
 function writeHeaders_(sh) {
+  // 使っていない列（I〜Z など）を消されていたら、A〜J列が収まるように列を足します
+  const mc = sh.getMaxColumns();
+  if (mc < HEADERS_.length) sh.insertColumnsAfter(mc, HEADERS_.length - mc);
   const r = sh.getRange(1, 1, 1, HEADERS_.length);
   r.setNumberFormat('@');
   r.setValues([HEADERS_]);
@@ -597,6 +601,15 @@ function writeHeaders_(sh) {
 }
 
 /* A〜J列の途中に列を差し込む・消すと全員のデータがずれて書き込まれるので止めます（head はK列まで。見出しの書き換えだけなら通します） */
+/* 見出しの行が1行目からずれていないか（1行目を消した・上に行を差し込んだ）。ずれていたら書き込まずに止めます */
+function checkHeaderRow_(head, below) {
+  const t = function (v) { return v === null || v === undefined ? '' : String(v).trim(); };
+  // 1行目が名簿の行に見える（お名前の見出しでなく、IDかトークンの形の値がある）
+  if (t(head[2]) !== HEADERS_[2] && (/^p[A-Za-z0-9]{10}$/.test(t(head[0])) || /^[A-Za-z0-9]{20}$/.test(t(head[1])))) throw appErr_(ERR_HEADER_);
+  // 2行目より下に見出しの行がある
+  if (below.some(function (r) { return t(r[0]) === HEADERS_[0] && t(r[1]) === HEADERS_[1] && t(r[2]) === HEADERS_[2]; })) throw appErr_(ERR_HEADER_);
+}
+
 function checkColumns_(head) {
   const h = head.map(function (v) { return v === null || v === undefined ? '' : String(v).trim(); });
   for (let c = 0; c < h.length && c <= HEADERS_.length; c++) {
@@ -640,6 +653,7 @@ function ensurePeopleSheet_(ss, create) {
   const sh = lockedSheet_(ss, SHEET_PEOPLE_, create);
   if (sh.getLastRow() < 1) { writeHeaders_(sh); return sh; }
   const raw = sh.getRange(1, 1, 1, Math.min(HEADERS_.length + 1, sh.getMaxColumns())).getValues()[0];
+  checkHeaderRow_(raw, sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : []);
   checkColumns_(raw);
   const head = raw.slice(0, HEADERS_.length).map(function (v) { return String(v).trim(); });
   if (head.join('\t') === HEADERS_.join('\t')) return sh;
@@ -782,11 +796,13 @@ function load_(locked) {
   const settings = parseSettings_(rows);
   const W = HEADERS_.length;
   const db = { sheet: sheet, settingsSheet: settingsSheet, settings: settings, people: [], ghosts: [], loadedRows: [], loadedRaw: Object.create(null), dirty: false };
+  // 列が足りない（I〜Z列を消した）ときは、ロックの中で列を足してから読みます
+  if (!locked && sheet.getMaxColumns() < HEADERS_.length) return withLock_(function () { return load_(true); });
   const last = sheet.getLastRow();
   if (last >= 1) {
     // A〜J列だけを読みます（右側の幹事の列には触れません）。列がずれていれば止めます（ロックの中は ensurePeopleSheet_ が確認済み）
     const rg = sheet.getRange(1, 1, last, W), all = rg.getValues(), fs = rg.getFormulas();
-    if (!locked) checkColumns_(all[0]);
+    if (!locked) { checkHeaderRow_(all[0], all.slice(1)); checkColumns_(all[0]); }
     const values = all.slice(1);
     const named = [];
     values.forEach(function (r, i) {

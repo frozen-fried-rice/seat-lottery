@@ -2046,5 +2046,46 @@ test('回帰5: スプレッドシートのメニューから初期設定を実�
   assert.match(ctx.__mock.ui.alerts.pop()[0], /初期設定が終わりました/);
 });
 
+
+test('最終確認: 見出しの行を消した・上に行を差し込んだら、名簿を壊さずに止める', () => {
+  const { ctx, add, admin, call } = fresh();
+  const ps = add(['山田', '鈴木', '佐藤']).state.people;
+  const sh = ctx.__mock.sheet('参加者');
+  const before = JSON.stringify(ctx.__mock.values('参加者'));
+  sh.deleteRows(1, 1);                         // 見出しの行を消してしまった
+  const after = JSON.stringify(ctx.__mock.values('参加者'));
+  throwsMsg(() => admin('adminGetState'), /見出しの行/);
+  throwsMsg(() => admin('adminAddPeople', ['田中'], 'lottery'), /見出しの行/);
+  throwsMsg(() => call('participantGet', ps[1].token), /見出しの行/);
+  assert.equal(JSON.stringify(ctx.__mock.values('参加者')), after, 'シートに書き込まない');
+  sh.insertRowsAfter(0, 1); sh.getRange(1, 1, 1, 10).setValues([JSON.parse(before)[0]]); // 元に戻す
+  assert.deepEqual(admin('adminGetState').people.map(p => p.name), ['山田', '鈴木', '佐藤']);
+  sh.insertRowsAfter(0, 1);                    // 見出しの上に空の行を差し込んだ
+  throwsMsg(() => admin('adminGetState'), /見出しの行/);
+  throwsMsg(() => call('joinList', joinCodeOf(JSON.parse(JSON.stringify({ settings: { joinUrl: '?j=x' } })))), /QRコードが無効|見出しの行/);
+  sh.deleteRows(1, 1);
+  assert.deepEqual(admin('adminGetState').people.map(p => p.name), ['山田', '鈴木', '佐藤'], '見出しの書き換えだけのときは今までどおり');
+});
+
+
+test('最終確認: 使っていない列（I〜Z）を消しても「混み合っています」にならず、列を足して動く', () => {
+  const { ctx, add, admin, call } = fresh();
+  const [p] = add(['山田']).state.people;
+  const sh = ctx.__mock.sheet('参加者');
+  sh.deleteColumns(9, 18);               // I〜Z列を削除（8列だけ残る）
+  assert.equal(sh.getMaxColumns(), 8);
+  assert.equal(call('participantGet', p.token).name, '山田');
+  assert.equal(call('participantDraw', p.token).name, '山田');
+  assert.ok(sh.getMaxColumns() >= 10);
+  assert.deepEqual(ctx.__mock.values('参加者')[0].slice(8, 10), ['受付日時', '受付確認キー']);
+  assert.equal(admin('adminGetState').people.length, 1);
+});
+
+test('最終確認: 参加者画面の「自分専用のページを開く」は新しいタブで開く（スプレッドシートから作ったWebアプリでは画面全体の移動ができないため）', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'gas', 'Participant.html'), 'utf8');
+  assert.doesNotMatch(html, /target="_top"/);
+  assert.match(html, /id="mylink" target="_blank"/);
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
