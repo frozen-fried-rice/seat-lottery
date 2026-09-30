@@ -192,7 +192,7 @@ async function step(name, fn) {
       const link = await admin.inputValue('#qrlink');
       assert.ok(link.includes('?t='), 'リンクに ?t= が入る: ' + link);
       assert.equal(link, 'https://script.google.com/macros/s/TESTDEPLOY/exec?t=' + target.token);
-      assert.equal(await admin.getAttribute('#qropen', 'href'), link);
+      assert.equal(await admin.getAttribute('#qropen', 'href'), link + '&preview=1', '幹事が試しに開いても、その端末に覚えない');
       const box = await admin.locator('#qrbox svg').boundingBox();
       assert.ok(box.width >= 180, 'QR が大きく表示される (' + box.width + 'px)');
       assert.match(await text(admin, '#qrtitle'), /山田 太郎/);
@@ -906,6 +906,241 @@ async function step(name, fn) {
       await pg.setViewportSize({ width: 360, height: 740 });
       await noHScroll(pg, 'admin tables 360');
       for (const c of [pg, ph, fx]) await c.context().close();
+    });
+
+    await step('14) 総点検の回帰：保存失敗後・次の方・その他のEnter・演出の見直しのフォーカス／古い読み込みで失敗の表示が消えない／保存中に書き足したお名前／固定席の隠れた番号で検索に出ない', async () => {
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true, joinOpen: true }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['焦点 一郎', '焦点 二郎'], 'lottery']);
+      const code = state().settings.joinUrl.split('?j=')[1];
+      const ph = await newPage(browser, 'focus-phone', { width: 390, height: 844 });
+      const focused = () => ph.evaluate(() => { const a = document.activeElement; return !a || a === document.body ? 'BODY' : (a.id || a.dataset.key || a.tagName); });
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      await ph.locator('#joinlist button', { hasText: '焦点 一郎' }).click();
+      await ph.click('#confirmyes');
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      await ph.click('#draw');
+      await ph.locator('#again').waitFor({ state: 'visible', timeout: 15000 });
+      // (a) その他を入力して Enter で保存 → 「その他」のボタンにフォーカスが戻る
+      await ph.click('#otherbtn'); await ph.fill('#otherinput', 'ジンジャーエール'); await ph.press('#otherinput', 'Enter');
+      await ph.waitForFunction(() => /登録しました/.test(document.getElementById('drinkmsg').textContent));
+      assert.equal(await focused(), 'otherbtn', 'Enter で保存しても、その他のボタンに戻る');
+      // (b) 保存に失敗 → 押したボタンに戻り、覚えたフォーカスは残らない
+      for (let i = 0; i < 4; i++) faults.push({ label: 'focus-phone', name: 'participantSetDrink', mode: 'fail' });
+      await ph.focus('[data-key="m:ビール"]'); await ph.keyboard.press('Enter');
+      await ph.waitForFunction(() => /通信に失敗/.test(document.getElementById('drinkmsg').textContent), null, { timeout: 20000 });
+      assert.equal(await focused(), 'm:ビール', '失敗したら押したボタンへ戻る');
+      assert.equal(await ph.evaluate(() => savedFocus), '');
+      // (c) もう一度演出を見る → 終わったら同じボタンへ
+      await ph.focus('#again'); await ph.keyboard.press('Enter');
+      await ph.waitForFunction(() => !document.getElementById('again').hidden, null, { timeout: 5000 });
+      await ph.waitForFunction(() => document.activeElement === document.getElementById('again'), null, { timeout: 3000 });
+      // (d) 失敗のあと「ほかの方の受付をする」→ 次の方の画面で、前の方のドリンクのボタンにフォーカスが行かない
+      for (let i = 0; i < 4; i++) faults.push({ label: 'focus-phone', name: 'participantSetDrink', mode: 'fail' });
+      await ph.focus('[data-key="m:ビール"]'); await ph.keyboard.press('Enter');
+      await ph.waitForFunction(() => /通信に失敗/.test(document.getElementById('drinkmsg').textContent), null, { timeout: 20000 });
+      await ph.evaluate(() => { savedFocus = 'm:ビール'; }); // 失敗の直後に次の方へ替わった場合と同じ状態
+      await ph.click('#switchperson');
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      await ph.locator('#joinlist button', { hasText: '焦点 二郎' }).click();
+      await ph.click('#confirmyes');
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminDrawOne', [KEY, byName('焦点 二郎').id]);
+      await ph.evaluate(() => load());
+      await ph.locator('#result').waitFor({ state: 'visible' });
+      await ph.waitForTimeout(200);
+      assert.ok(!(await ph.evaluate(() => document.getElementById('drinklist').contains(document.activeElement))), '次の方のドリンクのボタンにフォーカスが行かない: ' + await focused());
+      assert.equal(await ph.evaluate(() => savedFocus), '');
+      assert.equal(byName('焦点 二郎').drink, null);
+      await ph.context().close();
+
+      const pg = await newPage(browser, 'sweep-admin', { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      // (e) 修正画面を開いたときの読み込みが、同じ名前での保存の失敗より後に届いても、失敗の表示は消えない
+      faults.push({ label: 'sweep-admin', name: 'adminGetState', mode: 'delay', ms: 1500 });
+      await pg.locator('#drinkrows tr', { hasText: '焦点 二郎' }).getByRole('button', { name: /修正/ }).click();
+      await pg.fill('#editname', '焦点 一郎');
+      await pg.click('#editform button[type=submit]');
+      await pg.locator('#editerror').waitFor({ state: 'visible' });
+      assert.match(await text(pg, '#editerror'), /すでに名簿にあります/);
+      await pg.waitForTimeout(2000); // 遅らせた読み込みが届くまで待つ
+      assert.equal(faults.filter(f => f.label === 'sweep-admin').length, 0, '遅らせた読み込みは使われた');
+      assert.equal(await pg.locator('#editerror').isVisible(), true, '修正画面の失敗の表示が残る');
+      assert.equal(await pg.locator('#error').isVisible(), true);
+      await pg.click('#editcancel');
+      await pg.click('#refresh'); await waitStatus(pg, /最新の状態/);
+      assert.equal(await pg.locator('#error').isVisible(), false, 'あとから始めた読み込みでは消える');
+      // (f) 名簿に追加：保存中に書き足したお名前は消えない
+      await pg.click('#tab-setup');
+      faults.push({ label: 'sweep-admin', name: 'adminAddPeople', mode: 'delay', ms: 1200 });
+      await pg.fill('#bulk', '追加 一郎\n追加 二郎');
+      await pg.click('#bulkadd');
+      await pg.fill('#bulk', '追加 一郎\n追加 二郎\n追加 三郎');
+      await pg.waitForFunction(() => /2人を名簿に追加しました/.test(document.getElementById('bulkstate').textContent), null, { timeout: 8000 });
+      assert.equal(await pg.inputValue('#bulk'), '追加 三郎', '送っていないお名前は残る');
+      assert.ok(!state().people.some(p => p.name === '追加 三郎'));
+      await pg.click('#bulkadd');
+      await waitStatus(pg, /1人を名簿に追加しました/);
+      assert.equal(await pg.inputValue('#bulk'), '');
+      // (g) 卓があるとき、番号で探しても、見えていない「固定席N」で固定席の方が出ない
+      await pg.click('#tab-drinks');
+      await pg.fill('#drinksearch', '1');
+      const rows = await pg.locator('#drinkrows tr:has(td)').allInnerTexts();
+      assert.ok(rows.length >= 1);
+      for (const r of rows) assert.ok(r.includes('1'), '見えている文字に 1 がある行だけ: ' + r);
+      assert.ok(!rows.some(r => r.includes(FIXED)), '固定席の方（卓あり）は出ない');
+      await pg.fill('#drinksearch', '');
+      await pg.context().close();
+    });
+
+    await step('15) 総点検 第2回の回帰：持ち主の画面に戻る・保存できないときの古いトークン・エラー時のフォーカス・遅れたドリンク保存／確認後の操作が消えない・卓の番号で検索・配膳の集計・入力エラー・印刷・卓の言葉・QRの作り直し', async () => {
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true, joinOpen: true, tables: 'A卓 30\nB卓 30\nC卓 30' }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['持ち主 太郎', '友人 花子', '遅延 三郎', '確認 四郎', '検索 五郎'], 'lottery']);
+      const code = state().settings.joinUrl.split('?j=')[1];
+      // (a) 「ほかの方の受付をする」で友人を受付したあと、持ち主が共通QRを読み直すと持ち主の画面に戻る
+      const ph = await newPage(browser, 'r2-phone', { width: 390, height: 844 });
+      await ph.addInitScript(() => { window.__SEKI_TIMEOUT_MS = 2000; });
+      const focused = () => ph.evaluate(() => { const a = document.activeElement; return !a || a === document.body ? 'BODY' : (a.id || a.tagName); });
+      const pick = async name => {
+        await ph.locator('#joinlist button', { hasText: name }).click();
+        await ph.waitForFunction(() => !document.getElementById('confirmyes').disabled);
+        await ph.click('#confirmyes');
+        await ph.locator('#intro').waitFor({ state: 'visible' });
+      };
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      await pick('持ち主 太郎');
+      await ph.click('#switchperson');
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      await pick('友人 花子');
+      await open(ph, { j: code });
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      assert.equal(await text(ph, '#name'), '持ち主 太郎 さん', '持ち主の画面に戻る');
+      await ph.click('#switchperson');
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      assert.match(await ph.locator('#joinlist button', { hasText: '友人 花子' }).innerText(), /このスマホで受付済み/, '友人は一覧から開ける');
+      // (b) 保存できないときは古いトークンを残さない
+      assert.equal(await ph.evaluate(() => { const o = Storage.prototype.setItem; Storage.prototype.setItem = () => { throw new Error('QuotaExceededError'); }; try { remember('ABCDEFGHabcdefgh1234'); } finally { Storage.prototype.setItem = o; } return localStorage.getItem('sekikuji.join.token'); }), null);
+      // (c) くじのエラー（席なし）のあと、読み直しも失敗したら「もう一度くじを引く」にフォーカスが戻る
+      await ph.evaluate(() => localStorage.removeItem('sekikuji.join.token'));
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      await pick('遅延 三郎');
+      faults.push({ label: 'r2-phone', name: 'participantDraw', mode: 'fail', message: '空いている席がありません。受付にお声がけください。' });
+      faults.push({ label: 'r2-phone', name: 'participantGet', mode: 'hang' });
+      await ph.focus('#draw'); await ph.keyboard.press('Enter');
+      await ph.waitForFunction(() => !document.getElementById('draw').disabled && !document.getElementById('drawerr').hidden, null, { timeout: 10000 });
+      assert.equal(await focused(), 'draw');
+      // (d) 遅れて届いた古いドリンクの保存は、あとで選んだドリンクを上書きしない
+      await ph.click('#draw');
+      await ph.locator('#resulthint').waitFor({ state: 'visible', timeout: 10000 });
+      faults.push({ label: 'r2-phone', name: 'participantSetDrink', mode: 'delay', ms: 3500 });
+      await ph.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await ph.locator('#drinkmsg.ng').waitFor({ timeout: 8000 });
+      await ph.locator('#drinklist button', { hasText: /^ハイボール$/ }).click();
+      await ph.locator('#drinkmsg.ok').waitFor();
+      await ph.waitForTimeout(3000); // 遅らせた保存がサーバーで動くまで待つ
+      assert.equal(faults.filter(f => f.label === 'r2-phone').length, 0);
+      assert.equal(byName('遅延 三郎').drink, 'ハイボール', '古い保存で上書きされない');
+      // (e) 「ほかの方の受付をする」の読み込みが時間切れ → 「もう一度読み込む」にフォーカス
+      faults.push({ label: 'r2-phone', name: 'joinList', mode: 'hang' });
+      await ph.focus('#switchperson'); await ph.keyboard.press('Enter');
+      await ph.locator('#bad').waitFor({ state: 'visible', timeout: 8000 });
+      assert.equal(await focused(), 'reload');
+      await ph.context().close();
+
+      const pg = await newPage(browser, 'r2-admin', { width: 1280, height: 900 });
+      await pg.addInitScript(() => { window.__printed = 0; window.print = () => { window.__printed++; }; });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      const reload = async () => { await pg.click('#tab-drinks'); await pg.evaluate(() => ok('')); await pg.click('#refresh'); await waitStatus(pg, /最新の状態/); };
+      // (f) 「更新」の読み込み中に確認の画面で OK を押しても、操作は消えない
+      faults.push({ label: 'r2-admin', name: 'adminGetState', mode: 'delay', ms: 1200 });
+      await pg.evaluate(() => { refresh(false); });
+      await pg.click('#refresh'); // 自動更新の途中なので、終わってから読み直す
+      await pg.click('#tab-qr');
+      await pg.locator('#qrrows tr', { hasText: '確認 四郎' }).getByRole('button', { name: /代わりに/ }).click();
+      await pg.locator('#askdialog[open]').waitFor();
+      faults.push({ label: 'r2-admin', name: 'adminGetState', mode: 'delay', ms: 1200 });
+      await pg.waitForFunction(() => document.body.classList.contains('busy'), null, { timeout: 5000 });
+      await pg.click('#askyes');
+      await waitStatus(pg, /確認 四郎さんの席は [ABC]卓 \d+番 です/);
+      assert.ok(byName('確認 四郎').seat >= 1);
+      // (g) 卓があるとき、隠れた通し番号（32）では探せない（見えている「B卓 2番」では探せる）
+      const kg = byName('検索 五郎');
+      const sh = ctx.__mock.sheet('参加者');
+      const rowOf = token => ctx.__mock.values('参加者').findIndex(r => String(r[1]) === token) + 1;
+      state().people.filter(p => p.seat === 32).forEach(p => callServer(ctx, 'adminUpdatePerson', [KEY, p.id, { clearSeat: true }]));
+      sh.getRange(rowOf(kg.token), 5).setValue(32);
+      sh.getRange(rowOf(kg.token), 6).setValue('ﾋﾞｰﾙ');
+      await reload();
+      await pg.fill('#drinksearch', '32');
+      assert.ok(!(await text(pg, '#drinkrows')).includes('検索 五郎'), '通し番号 32 では出ない');
+      await pg.fill('#drinksearch', 'b卓2');
+      assert.match(await text(pg, '#drinkrows'), /検索 五郎/);
+      await pg.fill('#drinksearch', '');
+      // (h) 卓ごとの配膳は、集計と同じくシートの「ﾋﾞｰﾙ」を「ビール」として数える
+      const bcard = await pg.locator('.tcard', { has: pg.locator('h4', { hasText: 'B卓' }) }).innerText();
+      assert.ok(!bcard.includes('ﾋﾞｰﾙ'), bcard);
+      assert.match(bcard, /ビール \d+/);
+      // (i) 修正画面の入力エラーは、開いたときの読み込みが遅れて届いても消えない
+      faults.push({ label: 'r2-admin', name: 'adminGetState', mode: 'delay', ms: 1200 });
+      await pg.locator('#drinkrows tr', { hasText: '検索 五郎' }).getByRole('button', { name: /修正/ }).click();
+      await pg.selectOption('#editdrink', 'other');
+      await pg.fill('#editother', '   ');
+      await pg.click('#editform button[type=submit]');
+      await pg.locator('#editerror').filter({ hasText: 'ドリンク名を入力してください' }).waitFor();
+      await pg.waitForTimeout(1600);
+      assert.equal(faults.filter(f => f.label === 'r2-admin').length, 0);
+      assert.equal(await pg.locator('#editerror').isVisible(), true, '入力エラーが残る');
+      await pg.click('#editcancel');
+      // (j) ブラウザのメニューで印刷すると、いまの画面が出る（前に作った印刷用の紙面は出ない）
+      await pg.emulateMedia({ media: 'print' });
+      const printView = () => pg.evaluate(() => [getComputedStyle(document.querySelector('main')).display, getComputedStyle(document.getElementById('printsheet')).display, document.getElementById('printsheet').children.length]);
+      let [mainD, sheetD] = await printView();
+      assert.notEqual(mainD, 'none'); assert.equal(sheetD, 'none');
+      await pg.click('#tableprint');
+      assert.equal(await pg.evaluate(() => window.__printed), 1);
+      [mainD, sheetD] = await printView();
+      assert.equal(mainD, 'none', '印刷ボタンの印刷中は紙面だけ'); assert.equal(sheetD, 'block');
+      await pg.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+      const after = await printView();
+      assert.deepEqual([after[0] !== 'none', after[1], after[2]], [true, 'none', 0], '印刷が終わったら片付ける');
+      await pg.emulateMedia({ media: 'screen' });
+      // (k) 卓があるときの案内は「卓の設定」と「◯卓 ◯番」で
+      await pg.click('#tab-setup');
+      assert.match(await text(pg, '#seatsstate'), /いちばん後ろの席 [ABC]卓 \d+番（.+さん）/);
+      assert.doesNotMatch(await text(pg, '#seatsstate'), /最大/);
+      await pg.evaluate(() => { S.summary.lottery = S.settings.seats + 2; render(); });
+      assert.match(await text(pg, '#warn'), /卓の設定で席数を増やす/);
+      sh.getRange(rowOf(kg.token), 5).setValue('Z卓 1');
+      await reload();
+      assert.match(await text(pg, '#warn'), /席番号を読み取れない方がいます：検索 五郎さん（「Z卓 1」）/);
+      assert.equal(sh.getRange(rowOf(kg.token), 5).getValue(), 'Z卓 1', '読み取れない値は消さない');
+      // (l) QRを作り直すときに「席とドリンクも消す」を選べる。「この端末で開く」で試しても、この端末に覚えない
+      const yk = byName('確認 四郎');
+      callServer(ctx, 'adminUpdatePerson', [KEY, yk.id, { drink: 'ウーロン茶' }]);
+      await reload(); await pg.click('#tab-qr');
+      await pg.locator('#qrrows tr', { hasText: '確認 四郎' }).getByRole('button', { name: /QRコードを表示/ }).click();
+      await pg.locator('#qrdialog[open]').waitFor();
+      assert.match(await pg.getAttribute('#qropen', 'href'), /&preview=1$/);
+      await pg.click('#qrreissue');
+      await pg.locator('#askoptwrap').waitFor({ state: 'visible' });
+      await pg.check('#askopt');
+      await pg.click('#askyes');
+      await waitStatus(pg, /QRコードを作り直しました/);
+      const yk2 = byName('確認 四郎');
+      assert.deepEqual([yk2.seat, yk2.drink], [null, null]);
+      const href = await pg.getAttribute('#qropen', 'href');
+      const tryer = await newPage(browser, 'r2-try', { width: 390, height: 844 });
+      await tryer.goto(base + '/exec' + href.slice(href.indexOf('?')));
+      await tryer.locator('#intro').waitFor({ state: 'visible' });
+      await open(tryer, { j: code });
+      await tryer.locator('#join').waitFor({ state: 'visible' });
+      await tryer.context().close();
+      await pg.click('#qrclose');
+      await pg.context().close();
     });
 
     await step('ページのエラー・コンソールエラーなし', async () => {

@@ -107,6 +107,7 @@ class MockSheet {
   insertRowsAfter(r, n) { const max = this.getMaxRows(); if (this._cells.length > r + 1) this._cells.splice(r + 1, 0, ...new Array(n)); this._maxRows = max + n; return this; }
   insertRows(r, n) { return this.insertRowsAfter(r - 1, n || 1); }
   insertColumnBefore(c) { this._cells.forEach(row => { if (row && row.length > c) row.splice(c, 0, undefined); }); return this; }
+  deleteColumns(c, n) { this._cells.forEach(row => { if (row && row.length > c) row.splice(c, n); }); return this; }
   getMaxColumns() { return 26; }
   setFrozenRows(n) { this._frozen = n; return this; }
   getFrozenRows() { return this._frozen; }

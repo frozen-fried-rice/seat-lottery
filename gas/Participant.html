@@ -139,7 +139,7 @@ const UNDECIDED='未定';
 const reduced=()=>{try{return window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}};
 const clean=t=>String(t==null?'':t).replace(/[​-‍⁠﻿­]/g,'').normalize('NFKC').trim().replace(/\s+/g,' ');
 let token='',view=null,rolling=null,replayTimer=null,drawing=false,saving=false,otherOpen=false;
-let joinCode='',joinPeople=[],picked=null,claiming=false;
+let joinCode='',joinPeople=[],picked=null,claiming=false,preview=false;
 // 表示している人が変わるたびに増やします。古い人あての返事が遅れて届いても、画面を上書きしないようにするためです
 let gen=0;
 let savedFocus=''; // 保存中はボタンを押せなくするのでフォーカスが外れます。保存後に同じボタンへ戻すために覚えておきます
@@ -197,10 +197,13 @@ function bad(msg){
  $('badtitle').textContent=net?'読み込めませんでした':stop?'いまは受付していません':'席の情報が読み取れません';
  $('badlead').textContent=net?'電波の良い場所で、下のボタンからもう一度読み込んでください。':stop?'受付が再開されたら、もう一度読み取ってください。うまくいかないときは受付にお声がけください。':'お手数ですが、受付でお渡ししたQRコードをもう一度読み取ってください。うまくいかないときは受付にお声がけください。';
  $('badmsg').textContent=msg;$('drinkbox').hidden=true;
+ // 押したボタン（「ほかの方の受付をする」など）が隠れてフォーカスが外れていたら、「もう一度読み込む」に移します（キーボード・読み上げの方のため）
+ const a=document.activeElement;
+ if(!a||a===document.body||!a.offsetParent)focusEl($('reload'));
 }
 // 前の方の入力・メッセージ・演出を片付けます（共通QRで次の方に替わるとき）
 function resetPerson(){
- stopRoll();drawing=false;saving=false;claiming=false;
+ stopRoll();drawing=false;saving=false;claiming=false;savedFocus='';
  otherOpen=false;$('otherinput').value='';msg('','');syncOther();
  $('drawerr').hidden=true;$('draw').disabled=false;$('draw').textContent='くじを引く';
 }
@@ -258,10 +261,14 @@ function showSeat(v){
 /* ---- 共通QR（全員同じQR）：名前を選ぶ ---- */
 // 受付した方のトークンと、このスマホの確認キーを覚えておきます（共通QRを作り直しても使えるよう、QRごとには分けません）
 const TOKEN_KEY='sekikuji.join.token',DEVICE_KEY='sekikuji.device';
-function store(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);return true;}catch(e){return false;}}
+// 書き込めなかったときは前の値も消します（容量いっぱいなどで。前の方のトークンが残って、あとで前の方の画面が開かないように）
+function store(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);return true;}catch(e){try{localStorage.removeItem(k);}catch(e2){}return false;}}
 function load1(k){try{return localStorage.getItem(k)||'';}catch(e){return '';}}
 function remembered(){return load1(TOKEN_KEY);}
 function remember(t){store(TOKEN_KEY,t);}
+// このスマホで最初に受付した方（ふつうはスマホの持ち主）だけを覚えます。「ほかの方の受付をする」で続けて受付した方では置き換えません
+// （持ち主があとで同じQRを読み取ったときに、友人の画面が開いて友人のドリンクを変えてしまわないように）
+function rememberFirst(t){if(!remembered())remember(t);}
 function forget(t){if(!t||remembered()===t)remember('');}
 let memDevice='';
 function deviceKey(){
@@ -332,7 +339,7 @@ function claim(){
  run('joinClaim',[joinCode,who.id,deviceKey()],r=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';
   if(picked!==who)return; // 別の方を選び直していた
-  gen++;token=r.token;remember(r.token);picked=null;
+  gen++;token=r.token;rememberFirst(r.token);picked=null;
   render(r.view,true);
  },m=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
@@ -349,14 +356,15 @@ $('confirmyes').onclick=claim;
 $('confirmno').onclick=()=>{picked=null;$('joinerr').hidden=true;joinLoad();};
 $('switchperson').onclick=()=>{
  if(drawing||saving)return;
- // 覚えているトークンは、次の方の受付が済むまで消しません（途中でやめても、この方の画面に戻れるように）
+ // 覚えているトークン（最初に受付した方）はそのままです。次の方を受付しても置き換えません（持ち主が読み取り直すと、持ち主の画面に戻れるように）
  $('joinsearch').value='';joinLoad();
 };
 
 function load(){
  show('loading');$('drinkbox').hidden=true;
  // 個別QRで開いた方も、このスマホに覚えておきます（あとで共通QRを読み取ったときに、名前を選ばずに自分の画面へ戻れるように）
- run('participantGet',[token],v=>{remember(token);render(v,true);},m=>bad(m));
+ // すでにほかの方を覚えていれば置き換えません。幹事画面の「この端末で開く」で試したとき（preview=1）は覚えません
+ run('participantGet',[token],v=>{if(!preview)rememberFirst(token);render(v,true);},m=>bad(m));
 }
 // 画面全体をサーバーの状態から描き直す
 function render(v,full){
@@ -402,24 +410,28 @@ function draw(){
   // 幹事が区分を変えた・QRを作り直した などサーバー側が変わったときは、最新の状態を読み直して画面を切り替えます
   if(!transient(m)){
    btn.disabled=true;
-   run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else btn.disabled=false;});
+   run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else{btn.disabled=false;const a=document.activeElement;if(!a||a===document.body)focusEl(btn);}});
   }else{drawing=false;syncSwitch();}
  });
 }
 function replay(){
  if(!view||view.seat==null||rolling||drawing||shown!=='result')return;
  if(reduced()||document.hidden){showSeat(view);return;}
+ const refocus=document.activeElement===$('again'); // 押したボタンを隠すので、演出のあとに戻します
  $('again').hidden=true;
  startRoll(view.tables&&view.tables.length?0:view.seat);
  const g=gen;
- replayTimer=setTimeout(()=>{replayTimer=null;if(g!==gen||!view)return;if(view.seat!=null&&shown==='result')showSeat(view);else render(view,true);},1500);
+ replayTimer=setTimeout(()=>{replayTimer=null;if(g!==gen||!view)return;if(view.seat!=null&&shown==='result'){showSeat(view);if(refocus&&(!document.activeElement||document.activeElement===document.body))focusEl($('again'));}else render(view,true);},1500);
 }
 
 /* ---- ドリンク ---- */
 function isOther(d){return d!=null&&d!==UNDECIDED&&!(view.drinks||[]).includes(d);}
 function drinkLabel(d){return d===UNDECIDED?'未定（あとで決める）':d;}
 function renderDrink(visible){
- const box=$('drinkbox');box.hidden=!visible;
+ const box=$('drinkbox'),list=$('drinklist');box.hidden=!visible;
+ // 描き直しても、押したボタンにフォーカスを残します（キーボード・読み上げの方のため）
+ const a=document.activeElement,keep=(a&&list.contains(a)?(a.id||a.dataset.key||''):'')||(!saving?savedFocus:'');
+ if(!saving)savedFocus=''; // 使わなかったときも消します（次の方の画面や、あとの描き直しで使わないように）
  if(!visible||!view)return;
  const d=view.drink==null?null:String(view.drink);
  if(!view.drinkOpen){
@@ -428,10 +440,7 @@ function renderDrink(visible){
   return;
  }
  $('drinkopen').hidden=false;$('drinkclosed').hidden=true;
- const list=$('drinklist'),items=[];
- // 描き直しても、押したボタンにフォーカスを残します（キーボード・読み上げの方のため）
- const a=document.activeElement,keep=(a&&list.contains(a)?(a.id||a.dataset.key||''):'')||(!saving?savedFocus:'');
- if(!saving)savedFocus='';
+ const items=[];
  for(const m of view.drinks||[]){
   const b=document.createElement('button');b.type='button';b.textContent=m;b.dataset.key='m:'+m;
   b.className=d===m?'sel':'';b.setAttribute('aria-pressed',String(d===m));
@@ -463,6 +472,13 @@ function syncOther(){
  $('otherform').hidden=!otherOpen;
  const o=$('otherbtn');if(o)o.setAttribute('aria-expanded',String(otherOpen));
 }
+// 保存に失敗したとき、押したボタン（その他の入力中なら入力欄）へフォーカスを戻します（保存中に押せなくしたので外れています）
+function restoreSaved(){
+ const k=savedFocus;savedFocus='';
+ if(!k||(document.activeElement&&document.activeElement!==document.body))return;
+ const t=k==='otherbtn'&&otherOpen?$('otherinput'):[...$('drinklist').children].find(x=>(x.id||x.dataset.key)===k);
+ if(t&&!t.disabled&&!$('drinkbox').hidden)focusEl(t);
+}
 function setBusy(b){
  document.querySelectorAll('#drinkbox button,#drinkbox input').forEach(e=>e.disabled=b);
  syncSwitch();
@@ -476,9 +492,9 @@ function save(drink){
  drink=clean(drink);
  if(!drink){msg('ドリンク名を入力してください。','ng',true);$('otherinput').focus();return;}
  if(drink.length>30){msg('ドリンク名は30文字以内で入力してください。','ng',true);return;}
- const fa=document.activeElement;savedFocus=fa&&$('drinklist').contains(fa)?(fa.id||fa.dataset.key||''):(fa&&fa.id==='othersave'?'otherbtn':'');
+ const fa=document.activeElement;savedFocus=fa&&$('drinklist').contains(fa)?(fa.id||fa.dataset.key||''):(fa&&(fa.id==='othersave'||fa.id==='otherinput')?'otherbtn':'');
  saving=true;setBusy(true);msg('保存しています…','',true);
- run('participantSetDrink',[token,drink],v=>{
+ run('participantSetDrink',[token,drink,(view&&view.drinkAt)||''],v=>{
   saving=false;
   // 幹事が席を空きに戻した・区分を変えた などで画面と違っていたら、画面全体を描き直します
   const changed=!view||v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat;
@@ -487,12 +503,12 @@ function save(drink){
   msg((v.drink===UNDECIDED?'「未定」':'「'+v.drink+'」')+'で登録しました。変更もできます。','ok',true);
   render(v,changed);
  },m=>{
-  // 締め切り・QR無効のときは、最新の状態を読み直すまで押せないままにします
-  const reload=/締め切/.test(m)||/QRコード/.test(m);
-  if(!reload){saving=false;setBusy(false);}
+  // 締め切り・QR無効・ほかの画面での変更のときは、最新の状態を読み直すまで押せないままにします
+  const reload=/締め切|QRコード|ほかの画面で/.test(m);
+  if(!reload){saving=false;setBusy(false);restoreSaved();}
   msg(m,'ng',true);
-  const reloadFail=m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else setBusy(false);};
-  if(/締め切/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat);},reloadFail);
+  const reloadFail=m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else{setBusy(false);restoreSaved();}};
+  if(/締め切|ほかの画面で/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat);},reloadFail);
   else if(/QRコード/.test(m))run('participantGet',[token],v=>{saving=false;render(v,true);},reloadFail);
  });
 }
@@ -506,7 +522,7 @@ function start(){
  try{
   google.script.url.getLocation(loc=>{
    const p=(loc&&loc.parameter)||{};
-   token=typeof p.t==='string'?p.t.trim():'';
+   token=typeof p.t==='string'?p.t.trim():'';preview=p.preview==='1';
    joinCode=!token&&typeof p.j==='string'?p.j.trim():'';
    if(joinCode){joinStart();return;}
    if(!token){bad('QRコードが無効です。受付にお声がけください。');return;}
