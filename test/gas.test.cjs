@@ -2177,5 +2177,50 @@ test('最終確認3: 見出しの行の一部を消した・全部書き換え�
   }
 });
 
+test('最終確認4: 見出しの行をほとんど消したあとの列の差し込み・削除も止める／以前の版のメモの見出し・区分を説明した見出しは通す', () => {
+  for (const keep of [0, 1, 2]) for (const op of ['del4', 'del5', 'del6', 'ins5']) {
+    const { ctx, add, admin, call } = fresh();
+    const ps = add(['山田', '鈴木', '森']).state.people;
+    for (const p of ps.slice(0, 2)) { call('participantDraw', p.token); call('participantSetDrink', p.token, 'ビール', null); }
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, keep + 1, 1, 10 - keep).setValues([new Array(10 - keep).fill('')]);
+    if (op === 'ins5') sh.insertColumnBefore(5); else sh.deleteColumns(+op.slice(3), 1);
+    const before = JSON.stringify(ctx.__mock.values('参加者').slice(1));
+    assert.throws(() => add(['新']), /列が追加・削除/, 'A〜' + keep + ' ' + op);
+    assert.equal(JSON.stringify(ctx.__mock.values('参加者').slice(1)), before, '書き込まない');
+  }
+  // 見出しを消したあと、1人の行の区分・受付確認キーを手で書き換えただけでは止めない
+  {
+    const { ctx, add, admin, call } = fresh();
+    const ps = add(['山田', '鈴木']).state.people;
+    for (const p of ps) call('participantDraw', p.token);
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 1, 1, 10).setValues([new Array(10).fill('')]);
+    sh.getRange(2, 4).setValue('xyz'); sh.getRange(2, 10).setValue('メモ');
+    assert.equal(admin('adminGetState').people.length, 2);
+  }
+  // 区分の列の見出しに「抽選/固定」と書いた・英語の lottery/fixed
+  for (const d of ['抽選/固定', 'lottery/fixed']) {
+    const { ctx, add, admin } = fresh();
+    add(['山田']);
+    ctx.__mock.sheet('参加者').getRange(1, 1, 1, 10).setValues([['No', 'QR', '名前', d, '席', '飲み物', '抽選時刻', '登録時刻', '受付', 'キー']]);
+    assert.equal(admin('adminGetState').people.length, 1, d);
+  }
+  // 以前の版（sheetVersion なし・9列）でJ列にメモの見出しがあり、A〜I列の見出しを消した
+  {
+    const { ctx, add, admin } = fresh();
+    add(['山田']);
+    const set = ctx.__mock.sheet('設定'), vr = set._dump().findIndex(r => r[0] === 'sheetVersion') + 1;
+    set.getRange(vr, 1, 1, 2).setValues([['', '']]);
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 1, 1, 10).setValues([['', '', '', '', '', '', '', '', '', 'メモ']]);
+    sh.getRange(2, 10).setValue('窓側希望');
+    assert.equal(admin('adminGetState').people.length, 1);
+    const v = ctx.__mock.values('参加者');
+    assert.equal(v[0][2], 'お名前');
+    assert.equal(v[0][10], 'メモ'); assert.equal(v[1][10], '窓側希望', 'メモはK列へ');
+  }
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

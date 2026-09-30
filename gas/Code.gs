@@ -608,19 +608,36 @@ function checkHeaderRow_(head, below) {
   // その列の見出しと同じ数／どの列でも見出しの言葉である数
   const pos = function (r) { return cells(r).filter(function (v, c) { return v === HEADERS_[c]; }).length; };
   const any = function (r) { return cells(r).filter(function (v) { return v && HEADERS_.indexOf(v) >= 0; }).length; };
+  const isDate = function (v) { return Object.prototype.toString.call(v) === '[object Date]' || /^\d{4}[\/-]\d{1,2}[\/-]\d{1,2}/.test(t(v)); };
+  const isKind = function (v) { return /^(抽選|固定([（(].*[）)])?|fixed|lottery)$/i.test(v); };
   // 名簿の行らしい（ID・トークンの形、区分、席番号の数、日時）
   const looksData = function (r) {
     const h = cells(r);
-    return /^p[A-Za-z0-9]{10}$/.test(h[0]) || /^[A-Za-z0-9]{20}$/.test(h[1]) || /^(抽選|固定|fixed|lottery)/.test(h[3]) ||
-      typeof r[4] === 'number' || [6, 7, 8].some(function (c) { return r[c] instanceof Date; });
+    return /^p[A-Za-z0-9]{10}$/.test(h[0]) || /^[A-Za-z0-9]{20}$/.test(h[1]) || isKind(h[3]) ||
+      typeof r[4] === 'number' || [6, 7, 8].some(function (c) { return isDate(r[c]); });
   };
   const h1 = cells(head), filled = h1.filter(function (v) { return v; }).length;
-  // 1行目：見出しの言葉が3つ以上（列がずれていれば checkColumns_ が止めます）・書いてあるのが本来の見出しだけ（一部を消した）なら見出しの行です。
+  // 1行目：見出しの言葉が3つ以上（列がずれていれば checkColumns_ が止めます）・書いてあるのが本来の見出しだけ（一部を消した。以前の版のI・J列はメモの見出しでもよい）なら見出しの行です。
   // 見出しを全部書き換えた行（6つ以上書いてあり、名簿の行らしくない）も見出しとして書き直します。それ以外は、見出しの行を消して名簿の行が1行目に来ています
-  const isHead = any(head) >= 3 || h1.every(function (v, c) { return !v || v === HEADERS_[c]; }) || (filled >= 6 && !looksData(head));
+  const isHead = any(head) >= 3 || (!looksData(head) && h1.every(function (v, c) { return !v || v === HEADERS_[c] || c >= 8; })) || (filled >= 6 && !looksData(head));
   if (!isHead) throw appErr_(ERR_HEADER_);
   // 2行目より下に見出しの行がある（上に行を差し込んだ）。名簿の行がその列の見出しと同じになるのは、お名前とドリンクの2つまでです
   if (below.some(function (r) { return pos(r) >= 3; })) throw appErr_(ERR_HEADER_);
+  // 見出しがほとんど残っていないと、見出しからは列のずれが分かりません。アプリが書いた行（IDとトークンがある）の並びで確かめます
+  if (pos(head) < 5) {
+    let rows = 0, strong = 0, weak = 0;
+    below.forEach(function (r) {
+      const h = cells(r);
+      // 席・ドリンク・日時がまだ無い行は、列がずれても見分けがつかないので数えません
+      if (!/^p[A-Za-z0-9]{10}$/.test(h[0]) || !/^[A-Za-z0-9]{20}$/.test(h[1]) || !h.slice(4).some(function (v) { return v; })) return;
+      rows++;
+      // 席番号・受付確認キーの列に日時がある・ドリンクの列に席番号の数がある → ずれています（手で書き直せる日時の列は見ません）
+      if ([4, 9].some(function (c) { return isDate(r[c]); }) || typeof r[5] === 'number') strong++;
+      // 区分が「抽選」「固定」でない・ドリンクの列に日時がある（手で書き換えたこともあるので、1行だけでは止めません）
+      else if (!isKind(h[3]) || isDate(r[5])) weak++;
+    });
+    if ((strong && strong * 2 >= rows) || (strong + weak >= 2 && (strong + weak) * 2 >= rows)) throw appErr_(ERR_COLUMNS_);
+  }
 }
 
 function checkColumns_(head) {
