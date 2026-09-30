@@ -2087,5 +2087,57 @@ test('最終確認: 参加者画面の「自分専用のページを開く」は
   assert.match(html, /id="mylink" target="_blank"/);
 });
 
+test('最終確認2: 見出しの行を消して名簿の行が1行目に来たら、その行を見出しで上書きせずに止める', () => {
+  const { ctx, admin } = fresh();
+  admin('adminAddPeople', ['お名前', '鈴木'], 'lottery'); admin('adminDrawAll');
+  const sh = ctx.__mock.sheet('参加者');
+  sh.deleteRows(1, 1);
+  const before = JSON.stringify(ctx.__mock.values('参加者'));
+  assert.throws(() => admin('adminAddPeople', ['田中'], 'lottery'), /見出しの行/);
+  assert.equal(JSON.stringify(ctx.__mock.values('参加者')), before, 'シートはそのまま');
+  // 手で名前だけ書いた行が1行目に来たときも同じ
+  const f2 = fresh(), sh2 = f2.ctx.__mock.sheet('参加者');
+  sh2.getRange(2, 3).setValue('手入力A'); sh2.getRange(3, 3).setValue('手入力B');
+  sh2.deleteRows(1, 1);
+  assert.throws(() => f2.admin('adminGetState'), /見出しの行/);
+  assert.equal(f2.ctx.__mock.values('参加者')[0][2], '手入力A');
+  // 1行目を空にしただけなら、見出しを書き直して続けられる
+  const f3 = fresh(), sh3 = f3.ctx.__mock.sheet('参加者');
+  f3.admin('adminAddPeople', ['山田'], 'lottery');
+  sh3.getRange(1, 1, 1, 10).setValues([new Array(10).fill('')]);
+  assert.equal(f3.admin('adminAddPeople', ['川田'], 'lottery').state.people.length, 2);
+  assert.equal(f3.ctx.__mock.values('参加者')[0][2], 'お名前');
+});
+
+test('最終確認2: 見出しを書き換えたあと上に行を差し込んでも、見出しの行を参加者にしない', () => {
+  for (const title of ['送別会 名簿', '']) {
+    const { ctx, admin } = fresh();
+    admin('adminAddPeople', ['山田'], 'lottery');
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 3).setValue('氏名');
+    assert.equal(admin('adminGetState').people.length, 1, '見出しの書き換えだけなら動く');
+    sh.insertRowsAfter(0, 1); if (title) sh.getRange(1, 1).setValue(title);
+    assert.throws(() => admin('adminGetState'), /見出しの行/);
+    assert.throws(() => admin('adminDrawAll'), /見出しの行/);
+    assert.equal(ctx.__mock.values('参加者')[1][2], '氏名', '書き換えた見出しは残る');
+  }
+});
+
+test('最終確認2: 以前の版のシートでI〜Z列（J〜Z列）を消していても、列を足して更新できる', () => {
+  for (const keep of [8, 9]) {
+    const { ctx, admin, call } = fresh();
+    const [p] = admin('adminAddPeople', ['山田'], 'lottery').state.people;
+    const set = ctx.__mock.sheet('設定'), vr = set._dump().findIndex(r => r[0] === 'sheetVersion') + 1;
+    set.getRange(vr, 1, 1, 2).setValues([['', '']]);
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 9, 1, 2).setValues([['', '']]);
+    sh.deleteColumns(keep + 1, sh.getMaxColumns() - keep);
+    assert.equal(admin('adminGetState').people[0].name, '山田');
+    assert.ok(sh.getMaxColumns() >= 10);
+    assert.deepEqual(ctx.__mock.values('参加者')[0].slice(8, 10), ['受付日時', '受付確認キー']);
+    assert.equal(call('participantDraw', p.token).name, '山田');
+  }
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -100,8 +100,8 @@ class MockSheet {
   }
   insertRowsAfter(r, n) { const max = this.getMaxRows(); if (this._cells.length > r + 1) this._cells.splice(r + 1, 0, ...new Array(n)); this._maxRows = max + n; return this; }
   // 列の数も実際のシートと同じく増減します（範囲が列数を超えるとエラー）
-  insertColumnBefore(c) { this._cells.forEach(row => { if (row && row.length > c) row.splice(c, 0, undefined); }); this._maxCols = this.getMaxColumns() + 1; return this; }
-  insertColumnsAfter(c, n) { this._cells.forEach(row => { if (row && row.length > c + 1) row.splice(c + 1, 0, ...new Array(n)); }); this._maxCols = this.getMaxColumns() + n; return this; }
+  insertColumnBefore(c) { if (c < 1 || c > this.getMaxColumns()) throw new Error("Those columns are out of bounds."); this._cells.forEach(row => { if (row && row.length > c) row.splice(c, 0, undefined); }); this._maxCols = this.getMaxColumns() + 1; return this; }
+  insertColumnsAfter(c, n) { if (c < 1 || c > this.getMaxColumns()) throw new Error("Those columns are out of bounds."); this._cells.forEach(row => { if (row && row.length > c + 1) row.splice(c + 1, 0, ...new Array(n)); }); this._maxCols = this.getMaxColumns() + n; return this; }
   deleteColumns(c, n) { this._cells.forEach(row => { if (row && row.length > c) row.splice(c, n); }); this._maxCols = this.getMaxColumns() - n; return this; }
   getMaxColumns() { return this._maxCols === undefined ? 26 : this._maxCols; }
   setFrozenRows(n) { this._frozen = n; return this; }

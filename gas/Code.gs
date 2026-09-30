@@ -604,10 +604,12 @@ function writeHeaders_(sh) {
 /* 見出しの行が1行目からずれていないか（1行目を消した・上に行を差し込んだ）。ずれていたら書き込まずに止めます */
 function checkHeaderRow_(head, below) {
   const t = function (v) { return v === null || v === undefined ? '' : String(v).trim(); };
-  // 1行目が名簿の行に見える（お名前の見出しでなく、IDかトークンの形の値がある）
-  if (t(head[2]) !== HEADERS_[2] && (/^p[A-Za-z0-9]{10}$/.test(t(head[0])) || /^[A-Za-z0-9]{20}$/.test(t(head[1])))) throw appErr_(ERR_HEADER_);
-  // 2行目より下に見出しの行がある
-  if (below.some(function (r) { return t(r[0]) === HEADERS_[0] && t(r[1]) === HEADERS_[1] && t(r[2]) === HEADERS_[2]; })) throw appErr_(ERR_HEADER_);
+  // 決まった見出しがその列にいくつあるか（見出しを書き換えただけなら、ほかの列の見出しは残っています）
+  const hits = function (r) { let n = 0; for (let c = 0; c < HEADERS_.length; c++) if (t(r[c]) === HEADERS_[c]) n++; return n; };
+  // 1行目に何か書いてあるのに見出しの行に見えない（見出しの行を消して、名簿の行が1行目に来た）。空の1行目は見出しを書き直します
+  if (head.slice(0, HEADERS_.length).some(function (v) { return t(v) !== ''; }) && hits(head) < 3) throw appErr_(ERR_HEADER_);
+  // 2行目より下に見出しの行がある（上に行を差し込んだ）
+  if (below.some(function (r) { return hits(r) >= 5; })) throw appErr_(ERR_HEADER_);
 }
 
 function checkColumns_(head) {
@@ -652,8 +654,11 @@ function lockedSheet_(ss, name, create) {
 function ensurePeopleSheet_(ss, create) {
   const sh = lockedSheet_(ss, SHEET_PEOPLE_, create);
   if (sh.getLastRow() < 1) { writeHeaders_(sh); return sh; }
+  // I〜Z列などを消して列が足りないときは、先に列を足します（足りないままでは右の列を読み書きできないため）
+  const mc = sh.getMaxColumns();
+  if (mc < HEADERS_.length) sh.insertColumnsAfter(mc, HEADERS_.length - mc);
   const raw = sh.getRange(1, 1, 1, Math.min(HEADERS_.length + 1, sh.getMaxColumns())).getValues()[0];
-  checkHeaderRow_(raw, sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, 3).getValues() : []);
+  checkHeaderRow_(raw, sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_.length).getValues() : []);
   checkColumns_(raw);
   const head = raw.slice(0, HEADERS_.length).map(function (v) { return String(v).trim(); });
   if (head.join('\t') === HEADERS_.join('\t')) return sh;
