@@ -584,7 +584,7 @@ async function refresh(manual,keepError,quiet){
  refreshing=true;const n=++seq;
  if(manual){busy++;setBusy();}
  try{const st=await api('adminGetState');if(applyState(st,n)&&n>errN){if(!keepError)$('error').hidden=true;if(manual&&!quiet)ok('最新の状態にしました。');}} // 修正・QRの画面の中のエラーは、その画面で次に保存するまで残します
- catch(e){if(n>=applied){if(manual)ok('');showError(e,manual?'':'自動更新に失敗しました：');}} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
+ catch(e){if(n>=applied){if(manual&&!quiet)ok('');showError(e,manual?'':'自動更新に失敗しました：');}} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
  finally{
   refreshing=false;if(manual){busy--;setBusy();}render();
   // 操作（保存など）の途中なら、操作が終わってから読みます（先に読むと、操作の結果より新しい番号の古い状態で、操作の結果を捨ててしまうため）

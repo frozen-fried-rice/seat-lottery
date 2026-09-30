@@ -2139,5 +2139,43 @@ test('最終確認2: 以前の版のシートでI〜Z列（J〜Z列）を消し�
   }
 });
 
+test('最終確認3: 見出しの行の一部を消した・全部書き換えた・列を差し込んだときの判定', () => {
+  // 見出しの一部（A〜H列など）を消しただけなら、見出しを書き直して続けられる
+  for (const n of [1, 2, 8, 9]) {
+    const { ctx, add, admin } = fresh();
+    add(['山田', '川田']);
+    ctx.__mock.sheet('参加者').getRange(1, 1, 1, n).setValues([new Array(n).fill('')]);
+    assert.equal(add(['森']).state.people.length, 3, 'A〜' + n + '列を消した');
+    assert.equal(ctx.__mock.values('参加者')[0][0], 'ID');
+  }
+  // 見出しを英語などに全部書き換えた・注記を付けただけなら、見出しを書き直す
+  for (const row of [['id', 'token', 'name', 'kind', 'seat', 'drink', 'drawn', 'drinkAt', 'claimed', 'key'],
+    ['ID', 'トークン', 'お名前（漢字）', '区分※', '席', '飲み物', '抽選', '登録', '受付', 'キー']]) {
+    const { ctx, add, admin } = fresh();
+    add(['山田']);
+    ctx.__mock.sheet('参加者').getRange(1, 1, 1, 10).setValues([row]);
+    assert.equal(admin('adminGetState').people.length, 1);
+    assert.equal(add(['森']).state.people.length, 2);
+  }
+  // A〜C列に列を差し込んだ・消したときは、列の案内を出す（行の案内ではなく）
+  for (const op of ['ins', 'del']) for (const c of [1, 2, 3]) {
+    const { ctx, add, admin } = fresh();
+    add(['山田']);
+    const sh = ctx.__mock.sheet('参加者');
+    if (op === 'ins') sh.insertColumnBefore(c); else sh.deleteColumns(c, 1);
+    assert.throws(() => admin('adminGetState'), /列が追加・削除/, op + c);
+  }
+  // 見出しを3〜4つだけ残して書き換え、上に行を差し込んだら止める（見出しの行を参加者にしない）
+  for (const keep of [3, 4]) {
+    const { ctx, add, admin } = fresh();
+    add(['山田']);
+    const sh = ctx.__mock.sheet('参加者');
+    for (let c = keep + 1; c <= 10; c++) sh.getRange(1, c).setValue(ctx.__mock.values('参加者')[0][c - 1] + '※');
+    assert.equal(admin('adminGetState').people.length, 1);
+    sh.insertRowsAfter(0, 1);
+    assert.throws(() => admin('adminDrawAll'), /見出しの行/);
+  }
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

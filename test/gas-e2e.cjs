@@ -1436,6 +1436,27 @@ async function step(name, fn) {
         await pg.context().close();
       }
       callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      // C: 読み直しをもう一度している間も、演出は回ったまま（途中の数字を席として見せない）
+      {
+        callServer(ctx, 'adminAddPeople', [KEY, ['再演 三郎'], 'lottery']);
+        const tk = byName('再演 三郎').token, seat = callServer(ctx, 'participantDraw', [tk]);
+        const label = 'replay-C';
+        const pg = await newPage(browser, label, { width: 390, height: 844 });
+        await open(pg, { t: tk });
+        await pg.waitForSelector('#again:not([hidden])');
+        await pg.waitForSelector('#drinkopen:not([hidden])');
+        faults.push({ label, name: 'participantGet', mode: 'delay', ms: 200 }, { label, name: 'participantGet', mode: 'delay', ms: 3000 });
+        await pg.click('#again');
+        await pg.waitForTimeout(150);
+        await pg.click('#drinklist button:first-child');
+        await pg.waitForFunction(() => /登録しました/.test(document.getElementById('drinkmsg').textContent));
+        await pg.waitForTimeout(2000); // 最初の読み直しの演出（1.5秒）が終わり、2回目の読み直しを待っているところ
+        const st = await pg.evaluate(() => ({ rolling: rolling !== null, again: document.getElementById('again').hidden })); // eslint-disable-line no-undef
+        assert.ok(st.rolling && st.again, '読み直し中は回したまま: ' + JSON.stringify(st));
+        await pg.waitForSelector('#again:not([hidden])', { timeout: 10000 });
+        assert.equal((await text(pg, '#number')).replace('番', '').trim(), String(seat.table ? seat.tableSeat : seat.seat));
+        await pg.context().close();
+      }
     });
 
     await step('ページのエラー・コンソールエラーなし', async () => {

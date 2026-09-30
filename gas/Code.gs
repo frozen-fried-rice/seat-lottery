@@ -604,12 +604,23 @@ function writeHeaders_(sh) {
 /* 見出しの行が1行目からずれていないか（1行目を消した・上に行を差し込んだ）。ずれていたら書き込まずに止めます */
 function checkHeaderRow_(head, below) {
   const t = function (v) { return v === null || v === undefined ? '' : String(v).trim(); };
-  // 決まった見出しがその列にいくつあるか（見出しを書き換えただけなら、ほかの列の見出しは残っています）
-  const hits = function (r) { let n = 0; for (let c = 0; c < HEADERS_.length; c++) if (t(r[c]) === HEADERS_[c]) n++; return n; };
-  // 1行目に何か書いてあるのに見出しの行に見えない（見出しの行を消して、名簿の行が1行目に来た）。空の1行目は見出しを書き直します
-  if (head.slice(0, HEADERS_.length).some(function (v) { return t(v) !== ''; }) && hits(head) < 3) throw appErr_(ERR_HEADER_);
-  // 2行目より下に見出しの行がある（上に行を差し込んだ）
-  if (below.some(function (r) { return hits(r) >= 5; })) throw appErr_(ERR_HEADER_);
+  const cells = function (r) { const out = []; for (let c = 0; c < HEADERS_.length; c++) out.push(t(r[c])); return out; };
+  // その列の見出しと同じ数／どの列でも見出しの言葉である数
+  const pos = function (r) { return cells(r).filter(function (v, c) { return v === HEADERS_[c]; }).length; };
+  const any = function (r) { return cells(r).filter(function (v) { return v && HEADERS_.indexOf(v) >= 0; }).length; };
+  // 名簿の行らしい（ID・トークンの形、区分、席番号の数、日時）
+  const looksData = function (r) {
+    const h = cells(r);
+    return /^p[A-Za-z0-9]{10}$/.test(h[0]) || /^[A-Za-z0-9]{20}$/.test(h[1]) || /^(抽選|固定|fixed|lottery)/.test(h[3]) ||
+      typeof r[4] === 'number' || [6, 7, 8].some(function (c) { return r[c] instanceof Date; });
+  };
+  const h1 = cells(head), filled = h1.filter(function (v) { return v; }).length;
+  // 1行目：見出しの言葉が3つ以上（列がずれていれば checkColumns_ が止めます）・書いてあるのが本来の見出しだけ（一部を消した）なら見出しの行です。
+  // 見出しを全部書き換えた行（6つ以上書いてあり、名簿の行らしくない）も見出しとして書き直します。それ以外は、見出しの行を消して名簿の行が1行目に来ています
+  const isHead = any(head) >= 3 || h1.every(function (v, c) { return !v || v === HEADERS_[c]; }) || (filled >= 6 && !looksData(head));
+  if (!isHead) throw appErr_(ERR_HEADER_);
+  // 2行目より下に見出しの行がある（上に行を差し込んだ）。名簿の行がその列の見出しと同じになるのは、お名前とドリンクの2つまでです
+  if (below.some(function (r) { return pos(r) >= 3; })) throw appErr_(ERR_HEADER_);
 }
 
 function checkColumns_(head) {

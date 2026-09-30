@@ -134,7 +134,7 @@ const $=id=>document.getElementById(id);
 const UNDECIDED='未定';
 const reduced=()=>!!window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clean=t=>String(t==null?'':t).replace(/[​-‍⁠﻿­]/g,'').normalize('NFKC').trim().replace(/\s+/g,' ');
-let token='',view=null,rolling=null,replayTimer=null,drawing=false,saving=false,otherOpen=false;
+let token='',view=null,rolling=null,replayTimer=null,replaySeq=0,drawing=false,saving=false,otherOpen=false;
 let joinCode='',joinPeople=[],picked=null,claiming=false,preview=false;
 let gen=0; // 表示する人が変わるたびに増やし、前の人あての遅れた返事で画面を上書きしない
 let renders=0; // render のたびに増やします（演出の見直し中に保存などで描き直していたら、見直しで読んだ古い状態を使わないため）
@@ -231,6 +231,7 @@ function stopRoll(){
  $('tablename').style.minHeight='';
  if(rolling){clearInterval(rolling);rolling=null;}
  if(replayTimer){clearTimeout(replayTimer);replayTimer=null;}
+ replaySeq++; // 演出を止めたら、その「もう一度演出を見る」の読み直しの結果は使いません
 }
 function startRoll(top){
  stopRoll();$('announce').textContent='抽選しています';
@@ -422,24 +423,24 @@ function replay(){
  const anim=!(reduced()||document.hidden),t0=Date.now(),g=gen;let r0=renders;
  $('again').hidden=true;
  if(anim)startRoll(view.tables&&view.tables.length?0:view.seat);
+ const my=++replaySeq,live=()=>g===gen&&my===replaySeq&&!!view;
  // 席が空きに戻った・区分が変わったときにもう無い席を見せないよう、読み直してから出す
  const done=v=>{
-  replayTimer=null;if(g!==gen||!view)return;
-  // 読み直しの途中でドリンクの保存などで描き直していたら、どちらが新しいか分からないので、もう一度読み直します
-  if(renders!==r0){r0=renders;run('participantGet',[token],done,m=>{if(g!==gen)return;if(/QRコード/.test(m)){badToken(m);return;}done(view);});return;}
+  replayTimer=null;if(!live())return;
+  // 読み直しの途中でドリンクの保存などで描き直していたら、どちらが新しいか分からないので、もう一度読み直します（演出は回したまま）
+  if(renders!==r0){r0=renders;run('participantGet',[token],done,m=>{if(!live())return;if(/QRコード/.test(m)){stopRoll();badToken(m);return;}done(view);});return;}
   if(v.kind!=='fixed'&&v.seat!=null&&shown==='result'){
    render(v,false);showSeat(v);
    if(refocus&&(!document.activeElement||document.activeElement===document.body))focusEl($('again'));
   }else render(v,true); // 席が空きに戻っていたら「くじを引く」の画面にします
  };
  run('participantGet',[token],v=>{
-  if(g!==gen)return;
+  if(!live())return;
   const wait=anim?1500-(Date.now()-t0):0;
-  if(wait>0)replayTimer=setTimeout(()=>{stopRoll();done(v);},wait);else{stopRoll();done(v);}
+  if(wait>0)replayTimer=setTimeout(()=>done(v),wait);else done(v);
  },m=>{
-  if(g!==gen)return;
-  stopRoll();
-  if(/QRコード/.test(m)){badToken(m);return;}
+  if(!live())return;
+  if(/QRコード/.test(m)){stopRoll();badToken(m);return;}
   done(view); // 通信できないときは、いまの表示のままにします
  });
 }
