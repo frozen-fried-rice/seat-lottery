@@ -627,7 +627,9 @@ function checkHeaderRow_(head, below, current) {
   if (below.some(function (r) { return pos(r) >= 3; })) throw appErr_(ERR_HEADER_);
   // 見出しがほとんど残っていないと、見出しからは列のずれが分かりません。アプリが書いた行（IDとトークンがある）の並びで確かめます
   // I・J列の見出しが違う：I・J列を消して右のメモの列が来ていないか（受付日時は日時、受付確認キーは英数字）
-  if (current && ((h1[8] && h1[8] !== HEADERS_[8]) || (h1[9] && h1[9] !== HEADERS_[9]))) {
+  // （見出しの無いメモの列が来たときは I1・J1 が空になるので、A〜H列の見出しがそろっていれば空でも確かめます）
+  if (current && ((h1[8] && h1[8] !== HEADERS_[8]) || (h1[9] && h1[9] !== HEADERS_[9]) ||
+      ((!h1[8] || !h1[9]) && h1.slice(0, 8).every(function (v, c) { return v === HEADERS_[c]; })))) {
     let n = 0, bad = 0;
     below.forEach(function (r) {
       const h = cells(r);
