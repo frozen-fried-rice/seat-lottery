@@ -1325,11 +1325,17 @@ async function step(name, fn) {
       await ph.waitForFunction(() => !document.getElementById('confirmyes').disabled);
       await ph.click('#confirmyes');
       await ph.locator('#intro').waitFor({ state: 'visible' });
-      await ph.waitForFunction(t => localStorage.getItem('sekikuji.join.token') === t, byName('持主 九郎').token);
+      // 取り消された記録は消すだけ（次に受付したのが友人か持ち主かは分からないため）。次に読み取ると、
+      // エラーなしで一覧が開き、一番上の「このスマホで受付済み」から1回で自分の画面に戻れる
+      await ph.waitForFunction(() => !localStorage.getItem('sekikuji.join.token'));
       await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      assert.equal(await ph.locator('#joinerr').isHidden(), true, '「使えなくなりました」の遠回りは出ない');
+      const first = ph.locator('#joinlist button').first();
+      assert.match(await first.innerText(), /持主 九郎[\s\S]*このスマホで受付済み/);
+      await first.click();
       await ph.locator('#intro').waitFor({ state: 'visible' });
       assert.equal(await text(ph, '#name'), '持主 九郎 さん');
-      assert.equal(await ph.locator('#join').isHidden(), true);
       await ph.context().close();
 
       // (f) 幹事画面 360px：QRコードタブの「状態」の文字が、操作のボタンの下にもぐらない
@@ -1356,6 +1362,32 @@ async function step(name, fn) {
       assert.doesNotMatch(await text(pg, '#joinqr'), /先にWebアプリとしてデプロイ/);
       assert.equal(await pg.locator('#joincopy').isDisabled(), true);
       ctx.__mock.setUrl('https://script.google.com/macros/s/TESTDEPLOY/exec');
+      await pg.context().close();
+    });
+
+    await step('最終確認) 取り消された受付が残るスマホで友人→持ち主の順に受付しても、持ち主の画面を覚える', async () => {
+      callServer(ctx, 'adminSaveSettings', [KEY, { joinOpen: true }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['誤選 次郎', '友代 花子', '持主 太郎'], 'lottery']);
+      const code = state().settings.joinUrl.split('?j=')[1];
+      const pg = await newPage(browser, 'owner-phone', { width: 390, height: 844 });
+      const pick = async name => {
+        await pg.locator('#join').waitFor({ state: 'visible' });
+        await pg.fill('#joinsearch', name);
+        await pg.locator('#joinlist button', { hasText: name }).first().click();
+        await pg.waitForTimeout(600);
+        await pg.click('#confirmyes');
+        await pg.locator('#intro, #result, #fixed').first().waitFor({ state: 'attached' });
+        await pg.waitForFunction(n => document.getElementById('name').textContent.includes(n) || document.getElementById('name2').textContent.includes(n), name);
+      };
+      await open(pg, { j: code });
+      await pick('誤選 次郎');
+      callServer(ctx, 'adminUpdatePerson', [KEY, state().people.find(p => p.name === '誤選 次郎').id, { releaseClaim: true }]);
+      await pg.click('#switchperson'); await pick('友代 花子');
+      await pg.click('#switchperson'); await pick('持主 太郎');
+      await pg.waitForTimeout(800);
+      await open(pg, { j: code });
+      await pg.waitForFunction(() => /持主 太郎/.test(document.getElementById('name').textContent + document.getElementById('name2').textContent) || !document.getElementById('join').hidden);
+      assert.doesNotMatch(await pg.locator('main').innerText(), /友代 花子 さん/, '友人の画面は開かない');
       await pg.context().close();
     });
 

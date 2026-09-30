@@ -260,12 +260,14 @@ function load1(k){try{return localStorage.getItem(k)||'';}catch(e){return '';}}
 function remembered(){return load1(TOKEN_KEY);}
 function remember(t){store(TOKEN_KEY,t);}
 // 覚えるのは最初に受付した方（ふつうは持ち主）です。代わりに受付した友人で置き換えると、持ち主が読み取り直したとき友人の画面が開くため。
-// ただし覚えているトークンが使えなくなっていたら（受付のやり直し・QRの作り直し）、いま受付した・開いたトークンに置き換えます
-// （置き換えないと、あとで共通QRを読み取ったときに「使えなくなりました」と出て、自分の画面に戻れません）
-function rememberOwn(t){
+// 覚えているトークンが使えなくなっていたら（受付のやり直し・QRの作り直し）：
+//  ・個別QR（本人のリンク）で開いたときは、そのトークンに置き換えます（自分の画面に戻れるように）
+//  ・共通QRで名前を選んだときは、置き換えずに消すだけにします（代わりに受付した友人を持ち主として覚えないように。
+//    次に持ち主が受付すると、その方を覚えます）
+function rememberOwn(t,adopt){
  const r=remembered();
  if(!r||r===t){remember(t);return;}
- run('participantGet',[r],()=>{},m=>{if(/QRコード/.test(m)&&remembered()===r)remember(t);});
+ run('participantGet',[r],()=>{},m=>{if(/QRコード/.test(m)&&remembered()===r)remember(adopt?t:'');});
 }
 function forget(t){if(!t||remembered()===t)remember('');}
 let memDevice='';
@@ -344,7 +346,7 @@ function claim(){
  run('joinClaim',[joinCode,who.id,deviceKey()],r=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';
   if(picked!==who)return; // 別の方を選び直していた
-  gen++;token=r.token;rememberOwn(r.token);picked=null;
+  gen++;token=r.token;rememberOwn(r.token,false);picked=null;
   render(r.view,true);
  },m=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
@@ -364,7 +366,7 @@ $('switchperson').onclick=()=>{if(drawing||saving)return;$('joinsearch').value='
 function load(){
  show('loading');$('drinkbox').hidden=true;
  // 個別QRの方も覚える（あとで共通QRから名前を選ばずに戻れるように）。幹事の「この端末で開く」（preview=1）では覚えない
- run('participantGet',[token],v=>{render(v,true);if(!preview)rememberOwn(token);},m=>bad(m));
+ run('participantGet',[token],v=>{render(v,true);if(!preview)rememberOwn(token,true);},m=>bad(m));
 }
 // 画面全体をサーバーの状態から描き直す
 function render(v,full){
