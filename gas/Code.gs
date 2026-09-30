@@ -602,7 +602,9 @@ function writeHeaders_(sh) {
 
 /* A〜J列の途中に列を差し込む・消すと全員のデータがずれて書き込まれるので止めます（head はK列まで。見出しの書き換えだけなら通します） */
 /* 見出しの行が1行目からずれていないか（1行目を消した・上に行を差し込んだ）。ずれていたら書き込まずに止めます */
-function checkHeaderRow_(head, below) {
+/* 区分の列の固定席の書き方（「固定」「固定席」「固定（A卓）」「固定 A卓」など。かっこの中・後ろが卓の名前） */
+const FIXED_KIND_ = /^(?:固定|fixed)\s*(?:席)?\s*[（(:：、,，]?\s*(.*?)\s*[）)]?$/i;
+function checkHeaderRow_(head, below, current) {
   const t = function (v) { return v === null || v === undefined ? '' : String(v).trim(); };
   const cells = function (r) { const out = []; for (let c = 0; c < HEADERS_.length; c++) out.push(t(r[c])); return out; };
   // その列の見出しと同じ数／どの列でも見出しの言葉である数
@@ -624,6 +626,17 @@ function checkHeaderRow_(head, below) {
   // 2行目より下に見出しの行がある（上に行を差し込んだ）。名簿の行がその列の見出しと同じになるのは、お名前とドリンクの2つまでです
   if (below.some(function (r) { return pos(r) >= 3; })) throw appErr_(ERR_HEADER_);
   // 見出しがほとんど残っていないと、見出しからは列のずれが分かりません。アプリが書いた行（IDとトークンがある）の並びで確かめます
+  // I・J列の見出しが違う：I・J列を消して右のメモの列が来ていないか（受付日時は日時、受付確認キーは英数字）
+  if (current && ((h1[8] && h1[8] !== HEADERS_[8]) || (h1[9] && h1[9] !== HEADERS_[9]))) {
+    let n = 0, bad = 0;
+    below.forEach(function (r) {
+      const h = cells(r);
+      if (!/^p[A-Za-z0-9]{10}$/.test(h[0]) || !/^[A-Za-z0-9]{20}$/.test(h[1]) || !(h[8] || h[9])) return;
+      n++;
+      if ((h[8] && !isDate(r[8])) || (h[9] && !/^[A-Za-z0-9]{16,64}$/.test(h[9]))) bad++;
+    });
+    if (bad && bad * 2 >= n) throw appErr_(ERR_COLUMNS_);
+  }
   if (pos(head) < 5) {
     let rows = 0, strong = 0, weak = 0;
     below.forEach(function (r) {
@@ -634,7 +647,7 @@ function checkHeaderRow_(head, below) {
       // 席番号・受付確認キーの列に日時がある・ドリンクの列に席番号の数がある → ずれています（手で書き直せる日時の列は見ません）
       if ([4, 9].some(function (c) { return isDate(r[c]); }) || typeof r[5] === 'number') strong++;
       // 区分が「抽選」「固定」でない・ドリンクの列に日時がある（手で書き換えたこともあるので、1行だけでは止めません）
-      else if (!isKind(h[3]) || isDate(r[5])) weak++;
+      else if (!(isKind(h[3]) || FIXED_KIND_.test(h[3])) || isDate(r[5])) weak++;
     });
     if ((strong && strong * 2 >= rows) || (strong + weak >= 2 && (strong + weak) * 2 >= rows)) throw appErr_(ERR_COLUMNS_);
   }
@@ -686,7 +699,7 @@ function ensurePeopleSheet_(ss, create) {
   const mc = sh.getMaxColumns();
   if (mc < HEADERS_.length) sh.insertColumnsAfter(mc, HEADERS_.length - mc);
   const raw = sh.getRange(1, 1, 1, Math.min(HEADERS_.length + 1, sh.getMaxColumns())).getValues()[0];
-  checkHeaderRow_(raw, sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_.length).getValues() : []);
+  checkHeaderRow_(raw, sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_.length).getValues() : [], settingsHas_(ss, 'sheetVersion') !== false);
   checkColumns_(raw);
   const head = raw.slice(0, HEADERS_.length).map(function (v) { return String(v).trim(); });
   if (head.join('\t') === HEADERS_.join('\t')) return sh;
@@ -835,7 +848,7 @@ function load_(locked) {
   if (last >= 1) {
     // A〜J列だけを読みます（右側の幹事の列には触れません）。列がずれていれば止めます（ロックの中は ensurePeopleSheet_ が確認済み）
     const rg = sheet.getRange(1, 1, last, W), all = rg.getValues(), fs = rg.getFormulas();
-    if (!locked) { checkHeaderRow_(all[0], all.slice(1)); checkColumns_(all[0]); }
+    if (!locked) { checkHeaderRow_(all[0], all.slice(1), true); checkColumns_(all[0]); }
     const values = all.slice(1);
     const named = [];
     values.forEach(function (r, i) {
@@ -865,7 +878,7 @@ function load_(locked) {
     named.forEach(function (x) {
       const r = x.r, id = cellText_(r[0]), token = cellText_(r[1]);
       // 区分の列：「抽選」「固定」または「固定（A卓）」（固定席の方の卓）。手で「固定席」「固定 A卓」「Fixed(B卓)」などと書いても固定席として読みます
-      const km = /^(?:固定|fixed)\s*(?:席)?\s*[（(:：、,，]?\s*(.*?)\s*[）)]?$/i.exec(cellText_(r[3]) || '');
+      const km = FIXED_KIND_.exec(cellText_(r[3]) || '');
       const kind = km ? 'fixed' : 'lottery';
       const rawSeat = seatOf_(r[4], settings), hasSeat = cellText_(r[4]) !== null;
       // ドリンクは集計と同じ形（全角英数・半角カナ・空白をそろえた形）で扱います（手で「ﾋﾞｰﾙ」と書いても「ビール」と数えるため）

@@ -2222,5 +2222,31 @@ test('最終確認4: 見出しの行をほとんど消したあとの列の差�
   }
 });
 
+test('最終確認5: 受付確認キー（J列）・I〜J列を消して右のメモが来たら止める／手で書いた固定席の書き方では止めない', () => {
+  for (const [from, n] of [[10, 1], [9, 2]]) {
+    const { ctx, add, admin, call } = fresh();
+    const ps = add(['山田', '鈴木', '森']).state.people;
+    const code = new URL(admin('adminGetState').settings.joinUrl).searchParams.get('j');
+    call('joinClaim', code, ps[0].id, 'kAAAAAAAAAAAAAAAAAAAA');
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(1, 11, 4, 1).setValues([['メモ'], ['会費済'], ['会費未'], ['VIP']]);
+    sh.deleteColumns(from, n);
+    const before = JSON.stringify(ctx.__mock.values('参加者'));
+    assert.throws(() => admin('adminGetState'), /列が追加・削除/, 'delete ' + from + '+' + n);
+    assert.throws(() => call('joinList', code), /列が追加・削除/);
+    assert.equal(JSON.stringify(ctx.__mock.values('参加者')), before, 'メモを書き換えない');
+  }
+  // 固定席の方を手で「固定席」「固定 A卓」と書き、見出しの行を消した
+  {
+    const { ctx, add, admin, call } = fresh();
+    const ps = add(['a', 'b', 'c', 'd']).state.people;
+    call('participantGet', ps[0].token); call('participantGet', ps[1].token); // 個別のQRで開くと受付日時が入る
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(2, 4).setValue('固定席'); sh.getRange(3, 4).setValue('固定 A卓');
+    sh.getRange(1, 1, 1, 10).setValues([new Array(10).fill('')]);
+    assert.equal(admin('adminGetState').people.length, 4);
+  }
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
