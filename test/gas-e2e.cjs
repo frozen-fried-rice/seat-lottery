@@ -266,13 +266,13 @@ async function step(name, fn) {
       assert.match(await part.locator('#otherbtn.sel').innerText(), /ジンジャーエール ZERO/);
       assert.match(await text(part, '#drinkmsg'), /「ジンジャーエール ZERO」で登録済みです/);
 
-      // もう一度演出を見る（サーバーは呼ばない）
+      // もう一度演出を見る（幹事が席を空きに戻していないかを確かめるため、読み込みだけをする）
       const before = calls.length;
       await part.click('#again');
       await part.locator('#number.rolling').waitFor({ state: 'visible', timeout: 1000 });
       await part.locator('#again').waitFor({ state: 'visible', timeout: 4000 });
       assert.equal(Number((await text(part, '#number')).replace(/\D/g, '')), seat);
-      assert.equal(calls.length, before, '演出の見直しでサーバーを呼ばない');
+      assert.deepEqual(calls.slice(before).map(c => c.name), ['participantGet'], '演出の見直しでは読み込みだけ（くじは引き直さない）');
 
       // 未定も登録できる
       await part.locator('#drinklist button', { hasText: 'あとで決める（未定）' }).click();
@@ -483,7 +483,13 @@ async function step(name, fn) {
       await open(ph, { j: code });
       await ph.locator('#join').waitFor({ state: 'visible' });
       assert.match(await text(ph, '#join'), /送別会[\s\S]*お名前を選んでください/);
-      for (const n of claimedBefore) assert.equal(await ph.locator('#joinlist button', { hasText: n }).isDisabled(), true, n + ' は受付済みで押せない');
+      // 個別QRで受付した方は選べない（押すと、個別のQR・リンクから開くよう案内だけが出る）
+      for (const n of claimedBefore) {
+        await ph.locator('#joinlist button', { hasText: n }).click();
+        await ph.locator('#joinerr').filter({ hasText: '「' + n + '」さんは、個別のQRコード（またはLINEなどで届いたリンク）ですでに受付済みです' }).waitFor();
+        assert.equal(await ph.evaluate(() => document.activeElement.id), 'joinerr', '案内にフォーカスが移る');
+        assert.equal(await ph.locator('#confirm').isHidden(), true, n + ' は受付済みで選べない');
+      }
       assert.match(await ph.locator('#joinlist button', { hasText: LOTTERY[0] }).innerText(), /受付済み/);
       await shot(ph, 'join-list');
       await ph.fill('#joinsearch', who.name.slice(0, 2));
@@ -521,7 +527,7 @@ async function step(name, fn) {
       // 画面を開いたまま他のスマホが先に受付した場合 → 選ぶとエラーで一覧に戻る
       const other = state().people.find(p => !p.claimedAt);
       if (other) {
-        callServer(ctx, 'joinClaim', [code, other.id]);
+        callServer(ctx, 'joinClaim', [code, other.id, 'OtherPhoneKey0000000']); // ほかのスマホ（確認キーを送る）
         await ph2.locator('#joinlist button', { hasText: other.name }).click();
         await ph2.click('#confirmyes');
         await ph2.locator('#joinerr').filter({ hasText: 'すでに受付済み' }).waitFor();
@@ -985,6 +991,13 @@ async function step(name, fn) {
       assert.equal(await pg.inputValue('#bulk'), '');
       // (g) 卓があるとき、番号で探しても、見えていない「固定席N」で固定席の方が出ない
       await pg.click('#tab-drinks');
+      // くじの結果によっては「◯卓 1番」の方がいないので、いなければシートで1番の方を作ってから探します
+      if (!state().people.some(p => p.tableSeat === 1)) {
+        const free = [1, 11, 21].find(n => !state().people.some(p => p.seat === n)), t = byName('追加 一郎').token;
+        ctx.__mock.sheet('参加者').getRange(ctx.__mock.values('参加者').findIndex(r => String(r[1]) === t) + 1, 5).setValue(free);
+        await pg.evaluate(() => { document.getElementById('status').textContent = ''; });
+        await pg.click('#refresh'); await waitStatus(pg, /最新の状態/);
+      }
       await pg.fill('#drinksearch', '1');
       const rows = await pg.locator('#drinkrows tr:has(td)').allInnerTexts();
       assert.ok(rows.length >= 1);
@@ -1140,6 +1153,113 @@ async function step(name, fn) {
       await tryer.locator('#join').waitFor({ state: 'visible' });
       await tryer.context().close();
       await pg.click('#qrclose');
+      await pg.context().close();
+    });
+
+    await step('16) 総点検 第3回の回帰：締め切られた保存のフォーカス・使えなくなった覚えたトークンの置き換え・引き直し後の演出・かなの検索・個別リンクで受付済みの案内・操作中の「更新」・席番号の重なりの注意', async () => {
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true, joinOpen: true }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['締切 一郎', '幹事 二郎', '引直 三郎', '重複 四郎', '重複 五郎', '来賓 六郎'], 'lottery']);
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('来賓 六郎').id, { kind: 'fixed' }]);
+      const code = state().settings.joinUrl.split('?j=')[1];
+      const focusedOf = pg => pg.evaluate(() => { const a = document.activeElement; return !a || a === document.body ? 'BODY' : (a.id || a.tagName); });
+      // (a) ドリンクを保存しようとしたら締め切られていた → 締め切りの文にフォーカスが移る
+      const ph = await newPage(browser, 'r3-phone', { width: 390, height: 844 });
+      await open(ph, { t: byName('締切 一郎').token });
+      await ph.click('#draw');
+      await ph.locator('#resulthint').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: false }]);
+      await ph.locator('#drinklist button', { hasText: /^ビール$/ }).focus();
+      await ph.keyboard.press('Enter');
+      await ph.locator('#drinkclosed').waitFor({ state: 'visible' });
+      await ph.waitForFunction(() => document.activeElement && document.activeElement.id === 'drinkclosedmsg');
+      assert.equal(await ph.getAttribute('#drinkclosedmsg', 'role'), 'status');
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      // (b) 共通QRで試したあと「受付をやり直す」→ 同じスマホで自分の新しい個別QRを開くと、覚えるトークンが新しくなる
+      assert.equal(await ph.evaluate(() => localStorage.getItem('sekikuji.join.token')), byName('締切 一郎').token, '個別QRで開いた最初の方を覚えている');
+      await ph.evaluate(() => localStorage.removeItem('sekikuji.join.token'));
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      await ph.locator('#joinlist button', { hasText: '幹事 二郎' }).click();
+      await ph.waitForFunction(() => !document.getElementById('confirmyes').disabled);
+      await ph.click('#confirmyes');
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      const oldTok = await ph.evaluate(() => localStorage.getItem('sekikuji.join.token'));
+      assert.equal(oldTok, byName('幹事 二郎').token);
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('幹事 二郎').id, { releaseClaim: true }]);
+      const newTok = byName('幹事 二郎').token;
+      await open(ph, { t: newTok });
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      await ph.waitForFunction(t => localStorage.getItem('sekikuji.join.token') === t, newTok);
+      await open(ph, { j: code });
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      assert.equal(await text(ph, '#name'), '幹事 二郎 さん', '共通QRからも自分の画面に戻れる');
+      // (c) 幹事が「席を空きに戻す」→「もう一度演出を見る」で、古い席ではなく「くじを引く」が出る
+      await open(ph, { t: byName('引直 三郎').token });
+      await ph.click('#draw');
+      await ph.locator('#again').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('引直 三郎').id, { clearSeat: true }]);
+      await ph.click('#again');
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      assert.equal(await ph.locator('#draw').isEnabled(), true);
+      assert.equal(byName('引直 三郎').seat, null);
+      // (d) 共通QRの名前一覧：例は漢字。かなで見つからないときは漢字で試すよう案内する。個別リンクで受付した方は案内を出す
+      await ph.evaluate(() => localStorage.removeItem('sekikuji.join.token'));
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      assert.match(await ph.getAttribute('#joinsearch', 'placeholder'), /例：山田/);
+      await ph.fill('#joinsearch', 'ひきなお');
+      assert.match(await text(ph, '#joinlist'), /該当するお名前がありません。[\s\S]*漢字の一部/);
+      await ph.fill('#joinsearch', '引直');
+      const linkBtn = ph.locator('#joinlist button', { hasText: '引直 三郎' });
+      assert.equal(await linkBtn.isEnabled(), true);
+      await linkBtn.click();
+      await ph.locator('#joinerr').filter({ hasText: 'そのQRコード・リンクから開いてください' }).waitFor();
+      assert.equal(await ph.locator('#confirm').isHidden(), true);
+      await ph.context().close();
+
+      // (e) 幹事画面：自動更新の途中で「更新」を押してから操作しても、操作の結果が画面に残る
+      const pg = await newPage(browser, 'r3-admin', { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      assert.match(await pg.getAttribute('#drinksearch', 'placeholder'), /^例：山田／A卓 3$/, '卓があるときは「A卓 3」の形の例');
+      await pg.fill('#drinksearch', 'ひきなお');
+      assert.match(await text(pg, '#drinkrows'), /該当する方はいません。お名前が漢字のときは、漢字の一部/);
+      await pg.fill('#drinksearch', '');
+      faults.push({ label: 'r3-admin', name: 'adminGetState', mode: 'delay', ms: 1200 });
+      await pg.evaluate(() => { refresh(false); });
+      await pg.click('#refresh'); // 自動更新の途中なので、終わってから読む予定になる
+      faults.push({ label: 'r3-admin', name: 'adminSaveSettings', mode: 'delay', ms: 2000 });
+      await pg.click('#view-drinks .drinkopen');
+      await waitStatus(pg, /ドリンクの受付を締め切りました/);
+      await pg.waitForFunction(() => !document.body.classList.contains('busy'));
+      await pg.waitForTimeout(300);
+      assert.equal(state().settings.drinkOpen, false);
+      assert.equal(await pg.getAttribute('#view-drinks .drinkopen', 'aria-checked'), 'false', '操作の結果（締め切り）が画面に出ている');
+      assert.match(await text(pg, '#status'), /ドリンクの受付を締め切りました/, '待たせていた「更新」で、操作の結果の文を消さない');
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      // (f) シートで席番号を重ねた・固定席の方の席番号の列に書いた → 消さずに注意を出し、「修正」で消せる
+      const sh = ctx.__mock.sheet('参加者');
+      const rowOf = tok => ctx.__mock.values('参加者').findIndex(r => String(r[1]) === tok) + 1;
+      const d4 = byName('重複 四郎');
+      const v4 = callServer(ctx, 'participantDraw', [d4.token]);
+      sh.getRange(rowOf(byName('重複 五郎').token), 5).setValue(v4.table + ' ' + v4.tableSeat);
+      sh.getRange(rowOf(byName('来賓 六郎').token), 5).setValue('上座');
+      await pg.evaluate(() => { document.getElementById('status').textContent = ''; });
+      await pg.click('#refresh');
+      await waitStatus(pg, /最新の状態にしました/);
+      const warn = await text(pg, '#warn');
+      assert.match(warn, new RegExp('ほかの方と重なっている方がいます：重複 五郎さん（「' + v4.table + ' ' + v4.tableSeat + '」）'));
+      assert.match(warn, /固定席の方の「席番号」の列に、卓として読み取れない内容が書かれています：来賓 六郎さん（「上座」）/);
+      assert.equal(byName('重複 四郎').seat, v4.seat, 'くじで決まった方の席はそのまま');
+      await pg.locator('#drinkrows tr', { hasText: '来賓 六郎' }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#editdialog[open]').waitFor();
+      await pg.locator('#clearseatwrap').waitFor({ state: 'visible' });
+      assert.match(await text(pg, '#clearseatlabel'), /席番号の列に書かれた内容（「上座」）を消す/);
+      await pg.check('#editclearseat');
+      await pg.click('#editform button[type=submit]');
+      await waitStatus(pg, /来賓 六郎さんを修正しました/);
+      assert.equal(byName('来賓 六郎').badSeat, null);
+      assert.doesNotMatch(await text(pg, '#warn'), /来賓 六郎/);
       await pg.context().close();
     });
 

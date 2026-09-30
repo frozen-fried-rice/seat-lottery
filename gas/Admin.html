@@ -219,7 +219,7 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
    <div id="tablecards" class="tablecards"></div>
   </section>
   <div class="filters">
-   <div><label for="drinksearch">お名前・席番号で絞り込み</label><input id="drinksearch" autocomplete="off" placeholder="例：やま／12"></div>
+   <div><label for="drinksearch">お名前・席番号で絞り込み</label><input id="drinksearch" autocomplete="off" placeholder="例：山田／12"></div>
    <label class="check"><input type="checkbox" id="onlynone"> 未登録の方だけ</label>
   </div>
   <p class="hint" id="drinkcountline"></p>
@@ -263,7 +263,7 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
  <div class="panel">
   <div class="listhead"><div><h2>参加者一覧（個別QR・代わりに引く）</h2><p class="hint">スマホを持っていない方は「代わりに引く」で、この画面から席を決められます。</p></div></div>
   <label for="qrsearch" style="margin-top:0">お名前・席番号で絞り込み</label>
-  <input id="qrsearch" autocomplete="off" placeholder="例：やま／12">
+  <input id="qrsearch" autocomplete="off" placeholder="例：山田／12">
   <div id="qrrows" class="tablewrap" style="margin-top:10px"></div>
  </div>
 </section>
@@ -572,20 +572,22 @@ async function act(name,args,onOk){
   acting--;busy--;setBusy();render();
   const a=document.activeElement;
   if(before&&before!==document.body&&before.isConnected&&!before.disabled&&!before.closest('[hidden]')&&(!a||a===document.body)&&(!before.closest('dialog')||before.closest('dialog').open))before.focus({preventScroll:true});
+  if(!acting&&manualPending&&!refreshing){manualPending=false;refresh(true,true,true);} // 操作の途中で待たせていた「更新」を、操作の結果を出してから読みます（操作の結果の文・エラーの表示はそのまま）
  }
 }
 /* 自動・手動の読み込み */
 let refreshing=false,manualPending=false;
-async function refresh(manual,keepError){
+async function refresh(manual,keepError,quiet){
  if(refreshing){if(manual)manualPending=true;return;} // 自動更新の途中で「更新」を押したら、終わってからもう一度読みます
  if(busy&&!manual)return;
  refreshing=true;const n=++seq;
  if(manual){busy++;setBusy();}
- try{const st=await api('adminGetState');if(applyState(st,n)&&n>errN){if(!keepError)$('error').hidden=true;if(manual)ok('最新の状態にしました。');}} // 修正・QRの画面の中のエラーは、その画面で次に保存するまで残します
+ try{const st=await api('adminGetState');if(applyState(st,n)&&n>errN){if(!keepError)$('error').hidden=true;if(manual&&!quiet)ok('最新の状態にしました。');}} // 修正・QRの画面の中のエラーは、その画面で次に保存するまで残します
  catch(e){if(n>=applied)showError(e,manual?'':'自動更新に失敗しました：');} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
  finally{
   refreshing=false;if(manual){busy--;setBusy();}render();
-  if(manualPending){manualPending=false;refresh(true);}
+  // 操作（保存など）の途中なら、操作が終わってから読みます（先に読むと、操作の結果より新しい番号の古い状態で、操作の結果を捨ててしまうため）
+  if(manualPending&&!acting){manualPending=false;refresh(true);}
  }
 }
 function dialogOpen(){return [...document.querySelectorAll('dialog')].some(d=>d.open);}
@@ -662,6 +664,8 @@ function matcher(q){
  return p=>norm(p.name).includes(q)||(!tb&&p.seat!=null&&String(p.seat)===q)||(p.tableSeat!=null&&String(p.tableSeat)===q)||(!!p.fixedLabel&&!p.table&&norm(p.fixedLabel).includes(q))
   ||(!!p.table&&(norm(p.table)===q||norm(p.table).startsWith(q)||(p.tableSeat!=null&&norm(p.table+p.tableSeat)===q)));
 }
+// 絞り込みで見つからないとき。ひらがな・カタカナでは漢字のお名前に当たらないので、漢字でも試すよう案内します
+function noHit(q){return /^[\u3041-\u3096\u30fc]+$/.test(norm(q))?'該当する方はいません。お名前が漢字のときは、漢字の一部（例：山）でお試しください。':'該当する方はいません。';}
 function table(cols,heads,rows,cls){
  const t=el('table',{class:cls||null});
  const cg=el('colgroup');for(const c of cols)cg.append(el('col',{class:c}));
@@ -681,11 +685,16 @@ function render(){
  if(!S){lockUi();return;}
  const st=S.settings,sm=S.summary;
  $('eventhead').textContent=st.event||'';$('eventhead').hidden=!st.event;
+ const ph='例：山田／'+(hasTables()?(st.tables[0].name+' 3'):'12'); // 卓があるときは、画面に出ている「A卓 3」の形で探せます
+ for(const id of ['drinksearch','qrsearch'])if($(id).placeholder!==ph)$(id).placeholder=ph;
  const over=sm.lottery-st.seats;
  const warns=[];
  if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。'+(hasTables()?'「名簿・設定」の卓の設定で席数を増やすか、固定席に変えてください。':'「名簿・設定」で席数を増やすか、固定席に変えてください。'));
- const bad=S.people.filter(p=>p.badSeat);
- if(bad.length)warns.push('「参加者」シートの席番号を読み取れない方がいます：'+bad.slice(0,5).map(p=>p.name+'さん（「'+p.badSeat+'」）').join('、')+(bad.length>5?' ほか'+(bad.length-5)+'人':'')+'。直すまでは未抽選として扱います。シートで「'+(hasTables()?'A卓 3':'12')+'」のように直すか、その方の「修正」で消してください。');
+ const who=list=>list.slice(0,5).map(p=>p.name+'さん（「'+p.badSeat+'」）').join('、')+(list.length>5?' ほか'+(list.length-5)+'人':'');
+ const bad=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&!p.dupSeat),dup=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&p.dupSeat),fxb=S.people.filter(p=>p.badSeat&&p.kind==='fixed');
+ if(bad.length)warns.push('「参加者」シートの席番号を読み取れない方がいます：'+who(bad)+'。直すまでは未抽選として扱います。シートで「'+(hasTables()?'A卓 3':'12')+'」のように直すか、その方の「修正」で消してください。'+(hasTables()?'（卓に無い番号・席数より大きい番号も読み取れません）':'（抽選する席の数より大きい番号も読み取れません）'));
+ if(dup.length)warns.push('「参加者」シートの席番号が、ほかの方と重なっている方がいます：'+who(dup)+'。くじで先に決まっていた方の席をそのままにし、この方は直すまで未抽選として扱います。シートで別の席番号に直すか、その方の「修正」で消してください。');
+ if(fxb.length)warns.push('固定席の方の「席番号」の列に、卓として読み取れない内容が書かれています：'+who(fxb)+'。書かれた内容はシートに残しています。固定席の方の卓は「修正」で選んでください（選ぶと、この内容は消えます）。');
  if(NO_DIALOG)warns.push(NO_DIALOG_MSG);
  $('warn').hidden=!warns.length;$('warn').textContent=warns.join('　');
  for(const b of document.querySelectorAll('.drinkopen')){
@@ -764,7 +773,7 @@ function renderDrinks(){
  $('drinkcountline').textContent=S.people.length?list.length+'人を表示中':'';
  const box=$('drinkrows');
  if(!S.people.length){empty(box,'まだ名簿がありません。「名簿・設定」から登録してください。');return;}
- if(!list.length){empty(box,only?'未登録の方はいません。':'該当する方はいません。');return;}
+ if(!list.length){empty(box,only&&!$('drinksearch').value.trim()?'未登録の方はいません。':noHit($('drinksearch').value));return;}
  const rows=list.map(p=>el('tr',null,
   el('td',{class:'seat'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:seatText(p)}),
   el('td',{text:p.name}),
@@ -807,7 +816,7 @@ function renderQr(){
  const box=$('qrrows');
  if(!S.people.length){empty(box,'まだ名簿がありません。「名簿・設定」から登録してください。');return;}
  const hit=matcher($('qrsearch').value),list=sorted(S.people).filter(hit);
- if(!list.length){empty(box,'該当する方はいません。');return;}
+ if(!list.length){empty(box,noHit($('qrsearch').value));return;}
  const rows=list.map(p=>{
   const acts=el('div',{class:'actions'},
    el('button',{class:'small',text:'QR表示',disabled:!st.appUrl,'data-fk':'q:show:'+p.id,'aria-label':p.name+'さんのQRコードを表示',onclick:()=>openQr(p.id)}),
@@ -961,8 +970,8 @@ function kindHint(){
  const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
  $('edittablewrap').hidden=!(toFixed&&hasTables());
  $('editkindhint').textContent=p&&toFixed&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります。':toFixed?'固定席の方はくじを引きません。ドリンクだけ登録できます。':'くじを引いて席を決める方です。';
- $('clearseatwrap').hidden=!(p&&p.kind==='lottery'&&(p.seat!=null||p.badSeat)&&!toFixed);
- $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+placeText(p)+'）を空きに戻す':p&&p.badSeat?'読み取れない席番号（「'+p.badSeat+'」）を消す':'席を空きに戻す';
+ $('clearseatwrap').hidden=!(p&&(p.kind==='lottery'&&(p.seat!=null||p.badSeat)&&!toFixed||p.kind==='fixed'&&p.badSeat&&toFixed));
+ $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+placeText(p)+'）を空きに戻す':p&&p.badSeat?(p.kind==='fixed'?'席番号の列に書かれた内容':p.dupSeat?'ほかの方と重なっている席番号':'読み取れない席番号')+'（「'+p.badSeat+'」）を消す':'席を空きに戻す';
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};

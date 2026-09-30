@@ -46,13 +46,13 @@ button:disabled{cursor:default;opacity:.55}
 .names{display:grid;gap:8px;text-align:left}
 .names button{width:100%;min-height:54px;text-align:left;font-size:17px;padding:12px 16px;overflow-wrap:anywhere;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .names button .tag{font-size:12px;font-weight:700;color:#5b708c;flex:none}
-.names button:disabled{opacity:1;background:#f4f6fa;color:#8a97aa}
+.names button:disabled,.names button.claimed{opacity:1;background:#f4f6fa;color:#8a97aa}
 .names .empty{color:#617087;font-size:15px;margin:6px 2px}
 .confirmname{font-size:26px;font-weight:800;color:#193961;margin:6px 0 4px;overflow-wrap:anywhere}
 .stack{display:grid;gap:10px;margin-top:18px}
 .switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
 .linkbtn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;border-radius:14px;background:#e9eff8;color:#183659;font-weight:700;text-decoration:none}
-.linkbtn:focus-visible,h1:focus-visible,.who:focus-visible,.confirmname:focus-visible,.err:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+.linkbtn:focus-visible,h1:focus-visible,.who:focus-visible,.confirmname:focus-visible,.err:focus-visible,#drinkclosedmsg:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
 #mylinkbox{padding:18px 20px}
 [hidden]{display:none!important}
 @media (max-width:340px){.drinks{grid-template-columns:1fr}.number{font-size:92px}}
@@ -88,7 +88,7 @@ button:disabled{cursor:default;opacity:.55}
   <p class="lead" style="margin-bottom:16px">ご自身のお名前をタップしてください。</p>
   <p class="err" id="joinerr" role="alert" tabindex="-1" hidden></p>
   <label class="sr" for="joinsearch">お名前で絞り込み</label>
-  <input class="search" id="joinsearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="お名前の一部で絞り込み（例：やま）">
+  <input class="search" id="joinsearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="お名前の一部で絞り込み（例：山田）">
   <div class="names" id="joinlist"></div>
   <p class="hint" style="margin:16px 0 0">お名前が見つからないときは、受付にお声がけください。</p>
  </div>
@@ -122,7 +122,7 @@ button:disabled{cursor:default;opacity:.55}
   <p class="msg" id="drinkmsg" role="status" aria-live="polite"></p>
  </div>
  <div id="drinkclosed" hidden>
-  <p class="lead" style="margin:0">ドリンクの受付は締め切りました。</p>
+  <p class="lead" style="margin:0" id="drinkclosedmsg" tabindex="-1" role="status">ドリンクの受付は締め切りました。</p>
   <p class="hint" style="margin:10px 0 0">現在の登録</p>
   <p class="current" id="drinkcurrent"></p>
  </div>
@@ -269,6 +269,13 @@ function remember(t){store(TOKEN_KEY,t);}
 // このスマホで最初に受付した方（ふつうはスマホの持ち主）だけを覚えます。「ほかの方の受付をする」で続けて受付した方では置き換えません
 // （持ち主があとで同じQRを読み取ったときに、友人の画面が開いて友人のドリンクを変えてしまわないように）
 function rememberFirst(t){if(!remembered())remember(t);}
+// 個別QRで開いたとき：覚えているトークンが使えなくなっていたら（受付のやり直し・QRの作り直し）、いま開いたトークンに置き換えます
+// （置き換えないと、あとで共通QRを読み取ったときに自分の名前を選べなくなります）
+function rememberOwn(t){
+ const r=remembered();
+ if(!r||r===t){remember(t);return;}
+ run('participantGet',[r],()=>{},m=>{if(/QRコード/.test(m)&&remembered()===r)remember(t);});
+}
 function forget(t){if(!t||remembered()===t)remember('');}
 let memDevice='';
 function deviceKey(){
@@ -315,11 +322,18 @@ function renderJoin(){
   if(p.claimed){
    const t=document.createElement('span');t.className='tag';t.textContent=p.mine?'このスマホで受付済み':'受付済み';b.append(t);
    if(p.mine){b.onclick=()=>{if(claiming)return;picked=p;show('loading');claim();};b.setAttribute('aria-label',p.name+'（このスマホで受付済み。押すと開きます）');}
+   // 個別のQRコード・リンクで受付した方：押すと、そのQRコード・リンクから開くよう案内します（ご本人が名前を選べずに困らないように）
+   else if(p.link){b.className='claimed';b.onclick=()=>{const e=$('joinerr');e.textContent='「'+p.name+'」さんは、個別のQRコード（またはLINEなどで届いたリンク）ですでに受付済みです。ご本人の場合は、そのQRコード・リンクから開いてください。見つからないときは受付にお声がけください。';e.hidden=false;focusEl(e);};b.setAttribute('aria-label',p.name+'（受付済み。押すと開き方の案内が出ます）');}
    else{b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
   }else b.onclick=()=>pick(p);
   items.push(b);
  }
- if(!items.length){const e=document.createElement('p');e.className='empty';e.textContent=joinPeople.length?'該当するお名前がありません。':'名簿がまだ登録されていません。受付にお声がけください。';items.push(e);}
+ if(!items.length){
+  const e=document.createElement('p');e.className='empty';
+  // ひらがな・カタカナで探しても、漢字で登録したお名前には当たらないので、漢字でも試すよう案内します
+  e.textContent=!joinPeople.length?'名簿がまだ登録されていません。受付にお声がけください。':/^[ぁ-ゖー]+$/.test(q)?'該当するお名前がありません。お名前は漢字で登録されていることが多いので、漢字の一部（例：山）でもお試しください。':'該当するお名前がありません。';
+  items.push(e);
+ }
  root.replaceChildren(...items);
 }
 let confirmTimer=null;
@@ -364,7 +378,7 @@ function load(){
  show('loading');$('drinkbox').hidden=true;
  // 個別QRで開いた方も、このスマホに覚えておきます（あとで共通QRを読み取ったときに、名前を選ばずに自分の画面へ戻れるように）
  // すでにほかの方を覚えていれば置き換えません。幹事画面の「この端末で開く」で試したとき（preview=1）は覚えません
- run('participantGet',[token],v=>{if(!preview)rememberFirst(token);render(v,true);},m=>bad(m));
+ run('participantGet',[token],v=>{render(v,true);if(!preview)rememberOwn(token);},m=>bad(m));
 }
 // 画面全体をサーバーの状態から描き直す
 function render(v,full){
@@ -415,13 +429,29 @@ function draw(){
  });
 }
 function replay(){
- if(!view||view.seat==null||rolling||drawing||shown!=='result')return;
- if(reduced()||document.hidden){showSeat(view);return;}
+ if(!view||view.seat==null||rolling||drawing||shown!=='result'||$('again').hidden)return;
  const refocus=document.activeElement===$('again'); // 押したボタンを隠すので、演出のあとに戻します
+ const anim=!(reduced()||document.hidden),t0=Date.now(),g=gen;
  $('again').hidden=true;
- startRoll(view.tables&&view.tables.length?0:view.seat);
- const g=gen;
- replayTimer=setTimeout(()=>{replayTimer=null;if(g!==gen||!view)return;if(view.seat!=null&&shown==='result'){showSeat(view);if(refocus&&(!document.activeElement||document.activeElement===document.body))focusEl($('again'));}else render(view,true);},1500);
+ if(anim)startRoll(view.tables&&view.tables.length?0:view.seat);
+ // 幹事が席を空きに戻した（くじの引き直し）・区分を変えたときに、もう無い席を見せないよう、最新の状態を読み直してから結果を出します
+ const done=v=>{
+  replayTimer=null;if(g!==gen||!view)return;
+  if(v.kind!=='fixed'&&v.seat!=null&&shown==='result'){
+   render(v,false);showSeat(v);
+   if(refocus&&(!document.activeElement||document.activeElement===document.body))focusEl($('again'));
+  }else render(v,true); // 席が空きに戻っていたら「くじを引く」の画面にします
+ };
+ run('participantGet',[token],v=>{
+  if(g!==gen)return;
+  const wait=anim?1500-(Date.now()-t0):0;
+  if(wait>0)replayTimer=setTimeout(()=>{stopRoll();done(v);},wait);else{stopRoll();done(v);}
+ },m=>{
+  if(g!==gen)return;
+  stopRoll();
+  if(/QRコード/.test(m)){badToken(m);return;}
+  done(view); // 通信できないときは、いまの表示のままにします
+ });
 }
 
 /* ---- ドリンク ---- */
@@ -437,6 +467,8 @@ function renderDrink(visible){
  if(!view.drinkOpen){
   $('drinkopen').hidden=true;$('drinkclosed').hidden=false;
   $('drinkcurrent').textContent=d==null?'登録はありません':drinkLabel(d);
+  // 押したボタンが締め切りの表示に替わって消えたときは（保存しようとしたら締め切られていた）、締め切りの文にフォーカスを移して知らせます
+  if(keep&&(!document.activeElement||document.activeElement===document.body))focusEl($('drinkclosedmsg'));
   return;
  }
  $('drinkopen').hidden=false;$('drinkclosed').hidden=true;

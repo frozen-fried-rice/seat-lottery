@@ -61,14 +61,19 @@ function fmtDate(date, tz, pattern) {
 
 /* ---------- スプレッドシート ---------- */
 class MockSheet {
-  constructor(ss, name) { this._ss = ss; this._name = name; this._cells = []; this._frozen = 0; }
+  // シートID（getSheetId）：実際と同じく最初のシートは 0、あとから足したシートはばらばらの数。名前を変えても変わりません
+  constructor(ss, name) { this._ss = ss; this._name = name; this._cells = []; this._frozen = 0; this._id = ss._sheets && ss._sheets.length ? 1 + crypto.randomInt(2 ** 30) : 0; }
   _cell(r, c, create) {
     if (!this._cells[r]) { if (!create) return null; this._cells[r] = []; }
     if (!this._cells[r][c] && create) this._cells[r][c] = { v: '' };
     return this._cells[r][c] || null;
   }
   getName() { return this._name; }
-  setName(n) { this._name = n; return this; }
+  getSheetId() { return this._id; }
+  setName(n) {
+    if (this._ss._sheets.some(x => x !== this && x._name === n)) throw new Error('Exception: A sheet with the name "' + n + '" already exists. Please enter another name.');
+    this._name = n; return this;
+  }
   getParent() { return this._ss; }
   getRange(row, col, nr, nc) {
     if (typeof row === 'string') return a1Range(this, row);
