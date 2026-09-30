@@ -78,12 +78,13 @@ async function newPage(browser, label, viewport) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1, locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
   await context.exposeFunction('__gasCall', async (name, argsJson) => {
     calls.push({ label, name });
-    // 障害の再現：{ label?, name, mode: 'fail'（実行せず失敗）| 'lost'（実行したが返事が失われる）| 'hang'（返事が来ない）| 'delay', message?, ms? }
+    // 障害の再現：{ label?, name, mode: 'fail'（実行せず失敗）| 'lost'（実行したが返事が失われる）| 'hang'（返事が来ない）| 'delay' | 'delayfail'（待ってから失敗）, message?, ms? }
     const i = faults.findIndex(f => f.name === name && (!f.label || f.label === label));
     const f = i >= 0 ? faults.splice(i, 1)[0] : null;
     if (f && f.mode === 'fail') return { ok: false, message: f.message || 'NetworkError: Connection failure due to HTTP 0' };
     if (f && f.mode === 'hang') return new Promise(() => {});
     if (f && f.mode === 'delay') await new Promise(r => setTimeout(r, f.ms || 1500));
+    if (f && f.mode === 'delayfail') { await new Promise(r => setTimeout(r, f.ms || 1500)); return { ok: false, message: 'NetworkError: Connection failure due to HTTP 0' }; }
     try {
       const result = callServer(ctx, name, JSON.parse(argsJson));
       if (f && f.mode === 'lost') return { ok: false, message: f.message || 'NetworkError: Connection failure due to HTTP 0' };
@@ -1478,6 +1479,23 @@ async function step(name, fn) {
         else { assert.match(r.status, /ドリンクの受付を(締め切り|再開し)ました/, JSON.stringify(r)); assert.equal(r.err, null); }
         await pg.evaluate(() => { hideError(); ok(''); }); // eslint-disable-line no-undef
       }
+      // 操作が終わったあとに押した「更新」は、ふだんどおり最新にしてエラーを消す
+      faults.push({ label, name: 'adminGetState', mode: 'delay', ms: 1200 });
+      await pg.evaluate(() => { refresh(false); }); // eslint-disable-line no-undef
+      await pg.waitForTimeout(100);
+      faults.push({ label, name: 'adminSaveSettings', mode: 'fail', message: 'Error: テスト用の保存エラーです。' });
+      await pg.click('.drinkopen');
+      await pg.waitForFunction(() => !document.getElementById('error').hidden);
+      await pg.click('#refresh');
+      await waitStatus(pg, /最新の状態にしました/);
+      assert.equal((await st()).err, null);
+      // あとから終わった古い自動更新の失敗で、保存のエラーを上書きしない
+      faults.push({ label, name: 'adminGetState', mode: 'delayfail', ms: 1200 }, { label, name: 'adminSaveSettings', mode: 'fail', message: 'Error: テスト用の保存エラーです。' });
+      await pg.evaluate(() => { ok(''); refresh(false); }); // eslint-disable-line no-undef
+      await pg.waitForTimeout(100);
+      await pg.click('.drinkopen');
+      await pg.waitForTimeout(1600);
+      assert.equal((await st()).err, 'テスト用の保存エラーです。');
       callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
       await pg.context().close();
     });

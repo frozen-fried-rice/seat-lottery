@@ -577,18 +577,20 @@ async function act(name,args,onOk){
  }
 }
 /* 自動・手動の読み込み */
-let refreshing=false,manualPending=false,lastActDone=0;
+let refreshing=false,manualPending=false,manualAt=0,reloadPending=false,lastActDone=0;
 async function refresh(manual,keepError,quiet){
- if(refreshing){if(manual)manualPending=true;return;} // 自動更新の途中で「更新」を押したら、終わってからもう一度読みます
+ // 自動更新の途中で「更新」を押したら、終わってからもう一度読みます（ほかの画面での変更のあとの読み直しも捨てずに待たせます）
+ if(refreshing){if(manual){manualPending=true;manualAt=seq;}else if(keepError)reloadPending=true;return;}
  if(busy&&!manual)return;
  refreshing=true;const n=++seq;
  if(manual){busy++;setBusy();}
  try{const st=await api('adminGetState');if(applyState(st,n)&&n>errN){if(!keepError)$('error').hidden=true;if(manual&&!quiet)ok('最新の状態にしました。');}} // 修正・QRの画面の中のエラーは、その画面で次に保存するまで残します
- catch(e){if(n>=applied){if(manual&&!quiet)ok('');showError(e,manual?'':'自動更新に失敗しました：');}} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
+ catch(e){if(n>=applied&&n>errN){if(manual&&!quiet)ok('');showError(e,manual?'':'自動更新に失敗しました：');}} // もっと新しい状態がすでに出ていれば、古い読み込みの失敗は出さない
  finally{
   refreshing=false;if(manual){busy--;setBusy();}render();
   // 操作（保存など）の途中なら、操作が終わってから読みます（先に読むと、操作の結果より新しい番号の古い状態で、操作の結果を捨ててしまうため）
-  if(manualPending&&!acting){manualPending=false;const q=lastActDone>n;refresh(true,q,q);} // 待つ間に終わった操作があれば、その結果の文・エラーを残します
+  if(manualPending&&!acting){manualPending=reloadPending=false;const q=lastActDone>manualAt;refresh(true,q,q);} // 「更新」を押したあとに終わった操作があれば、その結果の文・エラーを残します
+  else if(reloadPending&&!acting){reloadPending=false;refresh(false,true);}
  }
 }
 function dialogOpen(){return [...document.querySelectorAll('dialog')].some(d=>d.open);}
