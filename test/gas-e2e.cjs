@@ -1412,6 +1412,32 @@ async function step(name, fn) {
       await pg.context().close();
     });
 
+    await step('最終確認2) 参加者画面：「もう一度演出を見る」の途中でドリンクを保存しても、あとから読んだ最新の状態（締め切り）を捨てない', async () => {
+      callServer(ctx, 'adminAddPeople', [KEY, ['再演 一郎', '再演 二郎'], 'lottery']);
+      for (const [variant, who] of [['A', '再演 一郎'], ['B', '再演 二郎']]) {
+        callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+        const tk = byName(who).token;
+        callServer(ctx, 'participantDraw', [tk]);
+        const label = 'replay-' + variant;
+        const pg = await newPage(browser, label, { width: 390, height: 844 });
+        await open(pg, { t: tk });
+        await pg.waitForSelector('#again:not([hidden])');
+        await pg.waitForSelector('#drinkopen:not([hidden])');
+        // A: 読み直しが遅れて届く／B: 読み直しが通信エラーで、自動で送り直す
+        faults.push(variant === 'A' ? { label, name: 'participantGet', mode: 'delay', ms: 1500 } : { label, name: 'participantGet', mode: 'fail' });
+        await pg.click('#again');
+        await pg.waitForTimeout(150);
+        await pg.click('#drinklist button:first-child');
+        await pg.waitForFunction(() => /登録しました/.test(document.getElementById('drinkmsg').textContent));
+        callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: false }]); // 保存のあと、読み直しより前に幹事が締め切った
+        await pg.waitForSelector('#again:not([hidden])', { timeout: 10000 });
+        await pg.waitForSelector('#drinkclosed:not([hidden])', { timeout: 10000 });
+        assert.equal(await pg.evaluate(() => view.drinkOpen), false, variant + ': 締め切りを表示');
+        await pg.context().close();
+      }
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });

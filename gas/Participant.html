@@ -419,13 +419,14 @@ function draw(){
 function replay(){
  if(!view||view.seat==null||rolling||drawing||shown!=='result'||$('again').hidden)return;
  const refocus=document.activeElement===$('again'); // 押したボタンを隠すので、演出のあとに戻します
- const anim=!(reduced()||document.hidden),t0=Date.now(),g=gen,r0=renders;
+ const anim=!(reduced()||document.hidden),t0=Date.now(),g=gen;let r0=renders;
  $('again').hidden=true;
  if(anim)startRoll(view.tables&&view.tables.length?0:view.seat);
  // 席が空きに戻った・区分が変わったときにもう無い席を見せないよう、読み直してから出す
  const done=v=>{
   replayTimer=null;if(g!==gen||!view)return;
-  if(renders!==r0)v=view; // 読み直しを頼んだあとにドリンクの保存などで描き直していたら、そちらが新しいのでそのまま使います
+  // 読み直しの途中でドリンクの保存などで描き直していたら、どちらが新しいか分からないので、もう一度読み直します
+  if(renders!==r0){r0=renders;run('participantGet',[token],done,m=>{if(g!==gen)return;if(/QRコード/.test(m)){badToken(m);return;}done(view);});return;}
   if(v.kind!=='fixed'&&v.seat!=null&&shown==='result'){
    render(v,false);showSeat(v);
    if(refocus&&(!document.activeElement||document.activeElement===document.body))focusEl($('again'));
