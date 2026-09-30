@@ -175,11 +175,12 @@ async function step(name, fn) {
       assert.equal(String(settingsSheet.event), '送別会');
       assert.equal(Number(settingsSheet.seats), 8);
       assert.equal(ctx.__mock.values('参加者').length, 7, '見出し＋6行');
-      assert.match(await text(admin, '#roster'), /部長 伊藤[\s\S]*固定席/);
-      assert.match(await text(admin, '#rostercount'), /名簿 6人（抽選席 5人・固定席 1人）/);
       await admin.locator('#eventhead').filter({ hasText: '送別会' }).waitFor();
       await noHScroll(admin, 'admin-pc setup');
       await shot(admin, 'admin-setup');
+      await admin.click('#tab-drinks');
+      assert.match(await admin.locator('#drinkrows tr', { hasText: FIXED }).innerText(), /固定/);
+      assert.match(await text(admin, '#drinktotal'), /名簿 6人（抽選席 5人・固定席 1人）/);
 
       // QR タブ → QR表示ダイアログ
       await admin.click('#tab-qr');
@@ -407,7 +408,6 @@ async function step(name, fn) {
       await waitStatus(admin, /ドリンクの受付を締め切りました/);
       assert.equal(state().settings.drinkOpen, false);
       assert.equal(await admin.locator('#view-drinks .drinkopen').getAttribute('aria-checked'), 'false');
-      assert.equal(await admin.locator('#view-setup .drinkopen').getAttribute('aria-checked'), 'false');
 
       await part.locator('#drinklist button', { hasText: /^ビール$/ }).click();
       await part.locator('#drinkclosed').waitFor({ state: 'visible' });
@@ -534,8 +534,8 @@ async function step(name, fn) {
         assert.equal(await ph2.locator('#joinlist button', { hasText: other.name }).isDisabled(), true);
       }
       // 幹事が「受付をやり直す」→ 2台目から選べる。1台目は取り消しを知らせて一覧に戻る
-      await admin.click('#tab-setup');
-      await admin.locator('#roster tr', { hasText: who.name }).getByRole('button', { name: /修正/ }).click();
+      await admin.click('#tab-drinks');
+      await admin.locator('#drinkrows tr', { hasText: who.name }).getByRole('button', { name: /修正/ }).click();
       await admin.locator('#editdialog[open]').waitFor();
       await admin.locator('#releasewrap').waitFor({ state: 'visible' }); // 開いたときに最新の状態を読み直して表示される
       await admin.check('#editrelease');
@@ -833,7 +833,8 @@ async function step(name, fn) {
       assert.match(await text(pg, '#tablesstate'), /3卓・合計 30席/);
       assert.deepEqual(state().settings.tables.map(t => t.name), ['A卓', 'B卓', 'C卓']);
       // 固定席の方の卓を修正画面で指定
-      await pg.locator('#roster tr', { hasText: FIXED }).getByRole('button', { name: /修正/ }).click();
+      await pg.click('#tab-drinks');
+      await pg.locator('#drinkrows tr', { hasText: FIXED }).getByRole('button', { name: /修正/ }).click();
       await pg.locator('#edittablewrap').waitFor({ state: 'visible' });
       await pg.selectOption('#edittable', 'B卓');
       await pg.click('#editform button[type=submit]');
@@ -1260,6 +1261,101 @@ async function step(name, fn) {
       await waitStatus(pg, /来賓 六郎さんを修正しました/);
       assert.equal(byName('来賓 六郎').badSeat, null);
       assert.doesNotMatch(await text(pg, '#warn'), /来賓 六郎/);
+      await pg.context().close();
+    });
+
+    await step('17) 総点検 第4回の回帰：演出の見直し中の保存・残した文の片付け・演出中に下が動かない・受付済みの案内が見える・受付し直したスマホ・幹事画面の狭い幅/dev/固定席の卓', async () => {
+      const code = new URL(state().settings.joinUrl).searchParams.get('j');
+      const baseTables = state().settings.tables.map(t => t.name + ' ' + t.seats).join('\n');
+      callServer(ctx, 'adminSaveSettings', [KEY, { tables: baseTables + '\nステージ前テーブル 4' }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['見直 一郎', '見直 二郎', '案内 七郎', '持主 九郎'], 'lottery']);
+      callServer(ctx, 'adminAddPeople', [KEY, ['来賓 八郎'], 'fixed']);
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('来賓 八郎').id, { table: 'ステージ前テーブル' }]);
+      const ph = await newPage(browser, 'r4-phone', { width: 320, height: 640 });
+      const selected = () => ph.locator('#drinklist button.sel').allTextContents();
+      // (a) 演出の見直し中にドリンクを選んでも、見直しで読んだ古い状態で選択が戻らず、次の変更で「ほかの画面で」と出ない
+      await open(ph, { t: byName('見直 一郎').token });
+      await ph.click('#draw');
+      await ph.locator('#again').waitFor({ state: 'visible' });
+      await ph.click('#again');
+      // (b) 演出のあいだ、卓の名前の高さを確保して、下のドリンクの欄が動かない（長い卓の名前が2行になる幅でも）
+      const tops = new Set();
+      for (let i = 0; i < 8; i++) { tops.add(await ph.evaluate(() => Math.round(document.getElementById('drinkbox').getBoundingClientRect().top))); await ph.waitForTimeout(40); }
+      assert.equal(tops.size, 1, '演出中のドリンクの欄の位置: ' + [...tops]);
+      await ph.locator('#drinklist button', { hasText: /^ビール$/ }).click();
+      await ph.waitForFunction(() => /「ビール」で登録しました/.test(document.getElementById('drinkmsg').textContent));
+      await ph.locator('#again').waitFor({ state: 'visible' });
+      assert.deepEqual(await selected(), ['ビール'], '見直しが終わっても選んだドリンクのまま');
+      await ph.locator('#drinklist button', { hasText: /^ハイボール$/ }).click();
+      await ph.waitForFunction(() => /「ハイボール」で登録しました/.test(document.getElementById('drinkmsg').textContent));
+      assert.equal(byName('見直 一郎').drink, 'ハイボール');
+      // (c) 残した文は、サーバーの状態が変わったら片付ける（受付で変更された・締め切りのあと再開された）
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('見直 一郎').id, { drink: 'ビール' }]);
+      await ph.click('#again');
+      await ph.locator('#again').waitFor({ state: 'visible' });
+      await ph.waitForFunction(() => /「ビール」で登録済みです/.test(document.getElementById('drinkmsg').textContent));
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: false }]);
+      await ph.locator('#drinklist button', { hasText: /^ハイボール$/ }).click();
+      await ph.locator('#drinkclosed').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      await ph.click('#again');
+      await ph.locator('#drinkopen').waitFor({ state: 'visible' });
+      await ph.locator('#again').waitFor({ state: 'visible' });
+      assert.doesNotMatch(await text(ph, '#drinkmsg'), /締め切/, '再開したあとに締め切りの文を残さない');
+      // (d) 共通QRの長い名前一覧の下のほうで、個別リンクで受付済みの方を押すと、案内が画面に見える
+      callServer(ctx, 'participantGet', [byName('案内 七郎').token]);
+      await ph.setViewportSize({ width: 375, height: 667 });
+      await ph.evaluate(() => localStorage.clear());
+      await open(ph, { j: code });
+      await ph.locator('#join').waitFor({ state: 'visible' });
+      const guideBtn = ph.locator('#joinlist button', { hasText: '案内 七郎' });
+      await guideBtn.scrollIntoViewIfNeeded();
+      assert.ok(await ph.evaluate(() => scrollY > 300), '一覧の下のほうまで動かしている');
+      await guideBtn.click();
+      await ph.waitForFunction(() => { const r = document.getElementById('joinerr').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; });
+      // (e) 間違えて別の方を選んだ → 幹事が受付をやり直す → 自分を選び直すと、次に読み取ったとき自分の画面が開く
+      await open(ph, { j: code });
+      await ph.locator('#joinlist button', { hasText: '見直 二郎' }).click();
+      await ph.waitForFunction(() => !document.getElementById('confirmyes').disabled);
+      await ph.click('#confirmyes');
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('見直 二郎').id, { releaseClaim: true }]);
+      await ph.click('#switchperson');
+      await ph.locator('#joinlist button', { hasText: '持主 九郎' }).click();
+      await ph.waitForFunction(() => !document.getElementById('confirmyes').disabled);
+      await ph.click('#confirmyes');
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      await ph.waitForFunction(t => localStorage.getItem('sekikuji.join.token') === t, byName('持主 九郎').token);
+      await open(ph, { j: code });
+      await ph.locator('#intro').waitFor({ state: 'visible' });
+      assert.equal(await text(ph, '#name'), '持主 九郎 さん');
+      assert.equal(await ph.locator('#join').isHidden(), true);
+      await ph.context().close();
+
+      // (f) 幹事画面 360px：QRコードタブの「状態」の文字が、操作のボタンの下にもぐらない
+      const pg = await newPage(browser, 'r4-admin', { width: 360, height: 740 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      await pg.click('#tab-qr');
+      await pg.locator('#qrrows tr', { hasText: '来賓 八郎' }).waitFor();
+      const over = await pg.evaluate(() => [...document.querySelectorAll('#qrrows td .tag')].filter(t => t.getBoundingClientRect().right > t.closest('td').getBoundingClientRect().right + 0.5).map(t => t.textContent));
+      assert.deepEqual(over, [], '欄からはみ出す状態の文字');
+      // (g) 卓を消すと、その卓の固定席の方の名前を知らせる（(a) のくじでその卓の席になっていても消せるよう、先に席を空きに戻します）
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('見直 一郎').id, { clearSeat: true }]);
+      await pg.click('#tab-setup');
+      await pg.fill('#tables', baseTables);
+      await pg.click('#tablessave');
+      await waitStatus(pg, /来賓 八郎さん（ステージ前テーブル）は、その卓が無くなったため卓を未設定に戻しました/);
+      assert.equal(byName('来賓 八郎').table, null);
+      // (h) テスト用のURL（/dev）しか取れないときは、全員共通のQRの欄にも /exec のURLを貼るよう案内する
+      ctx.__mock.setUrl('https://script.google.com/macros/s/TESTDEPLOY/dev');
+      await open(pg, { admin: KEY });
+      await pg.locator('#view-drinks').waitFor({ state: 'visible' });
+      await pg.click('#tab-qr');
+      assert.match(await text(pg, '#joinqr'), /テスト用のURL（\/dev で終わるもの）[\s\S]*QR用のURL/);
+      assert.doesNotMatch(await text(pg, '#joinqr'), /先にWebアプリとしてデプロイ/);
+      assert.equal(await pg.locator('#joincopy').isDisabled(), true);
+      ctx.__mock.setUrl('https://script.google.com/macros/s/TESTDEPLOY/exec');
       await pg.context().close();
     });
 

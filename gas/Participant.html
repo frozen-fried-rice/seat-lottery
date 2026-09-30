@@ -2,7 +2,6 @@
 <html lang="ja"><head><base target="_top"><meta charset="utf-8"><meta name="robots" content="noindex"><title>席くじ</title><style>
 :root{font-family:system-ui,-apple-system,'Noto Sans JP',sans-serif;color:#182d4a;background:#f3f6fb;font-size:16px}
 *{box-sizing:border-box}
-html,body{background:#f3f6fb}
 body{margin:0;min-height:100vh;min-height:100svh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:20px 16px}
 main,.card{width:100%;max-width:420px;background:#fff;border:1px solid #dfe6ef;border-radius:24px;padding:30px 22px;text-align:center;box-shadow:0 12px 40px #213a6314}
 .event{font-size:14px;font-weight:700;letter-spacing:.12em;color:#597089;margin:0 0 6px;overflow-wrap:anywhere}
@@ -10,13 +9,11 @@ h1{font-size:28px;margin:0 0 6px;overflow-wrap:anywhere;line-height:1.35}
 h2{font-size:20px;margin:0 0 14px;color:#193961}
 .lead{color:#617087;font-size:15px;line-height:1.9;margin:14px 0 22px}
 button{cursor:pointer;border:0;border-radius:14px;font:inherit;font-weight:700;min-height:56px;padding:14px 22px;background:#e9eff8;color:#183659;touch-action:manipulation}
-button:focus-visible,input:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
 button:disabled{cursor:default;opacity:.55}
 .primary{background:#2255aa;color:#fff;font-size:20px;min-height:66px;width:100%;box-shadow:0 6px 14px #2255aa26}
 .primary:active:not(:disabled){transform:translateY(1px)}
 .number{font-size:110px;line-height:1.1;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.05em;color:#193961;margin:10px 0 4px;min-height:124px;display:flex;align-items:center;justify-content:center;gap:4px}
 .tablename{font-size:40px;font-weight:800;color:#193961;margin:12px 0 -6px;line-height:1.2;overflow-wrap:anywhere}
-.tablename.rolling{color:#8fa3bf}
 .fixedtable{font-size:34px;font-weight:800;color:#193961;margin:4px 0 0;overflow-wrap:anywhere}
 .number small{font-size:26px;letter-spacing:0;font-weight:700}
 .rolling{color:#8fa3bf}
@@ -30,10 +27,9 @@ button:disabled{cursor:default;opacity:.55}
 .loading{color:#617087;font-size:16px;margin:0}
 .drinks{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .drinks button{min-height:58px;padding:10px 8px;font-size:16px;line-height:1.35;overflow-wrap:anywhere;border:2px solid transparent}
-.drinks button.sel{background:#193961;color:#fff}
+.drinks button.sel{background:#193961;border-color:#193961;color:#fff}
 .drinks .wide{grid-column:1/-1}
 .drinks .later{background:#fff;border-color:#cfd9e6;color:#44566f}
-.drinks .later.sel{background:#193961;border-color:#193961;color:#fff}
 .other{display:flex;gap:8px;margin-top:10px}
 .other input{flex:1;min-width:0;font:inherit;font-size:17px;min-height:56px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff}
 .other button{background:#2255aa;color:#fff;padding:10px 18px;flex:none}
@@ -52,13 +48,13 @@ button:disabled{cursor:default;opacity:.55}
 .stack{display:grid;gap:10px;margin-top:18px}
 .switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
 .linkbtn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;border-radius:14px;background:#e9eff8;color:#183659;font-weight:700;text-decoration:none}
-.linkbtn:focus-visible,h1:focus-visible,.who:focus-visible,.confirmname:focus-visible,.err:focus-visible,#drinkclosedmsg:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
+button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
 #mylinkbox{padding:18px 20px}
 [hidden]{display:none!important}
 @media (max-width:340px){.drinks{grid-template-columns:1fr}.number{font-size:92px}}
 @media (prefers-reduced-motion:reduce){.pop{animation:none}}
 </style></head><body>
-<main id="main">
+<main>
  <p class="loading" id="loading" role="status">読み込み中…</p>
  <div id="bad" hidden>
   <h1 id="badtitle">席の情報が読み取れません</h1>
@@ -136,21 +132,17 @@ button:disabled{cursor:default;opacity:.55}
 'use strict';
 const $=id=>document.getElementById(id);
 const UNDECIDED='未定';
-const reduced=()=>{try{return window.matchMedia('(prefers-reduced-motion: reduce)').matches;}catch(e){return false;}};
+const reduced=()=>!!window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 const clean=t=>String(t==null?'':t).replace(/[​-‍⁠﻿­]/g,'').normalize('NFKC').trim().replace(/\s+/g,' ');
 let token='',view=null,rolling=null,replayTimer=null,drawing=false,saving=false,otherOpen=false;
 let joinCode='',joinPeople=[],picked=null,claiming=false,preview=false;
-// 表示している人が変わるたびに増やします。古い人あての返事が遅れて届いても、画面を上書きしないようにするためです
-let gen=0;
+let gen=0; // 表示する人が変わるたびに増やし、前の人あての遅れた返事で画面を上書きしない
+let renders=0; // render のたびに増やします（演出の見直し中に保存などで描き直していたら、見直しで読んだ古い状態を使わないため）
 let savedFocus=''; // 保存中はボタンを押せなくするのでフォーカスが外れます。保存後に同じボタンへ戻すために覚えておきます
 
 const NET_ERR='通信に失敗しました。電波の良い場所で、もう一度お試しください。';
 const TIMEOUT_MS=window.__SEKI_TIMEOUT_MS||20000; // 返事が来ないまま待たせない（テストでは短くできます）
-/*
- * サーバーのエラー文を画面用に整えます。
- * このアプリのサーバーが出すエラーは日本語です。英語だけのもの（NetworkError、Googleの一時的なエラー、タイムアウトなど）は
- * 通信のエラーとして扱い、自動でやり直します。
- */
+// サーバーのエラーは日本語。日本語を含まないもの（NetworkError・Googleの一時的なエラーなど）は通信のエラーとして扱います
 function errText(e){
  let m=String(e&&e.message!=null?e.message:e==null?'':e).replace(/^(?:Uncaught\s+)?(?:[A-Za-z]*Error|Exception):\s*/,'').trim();
  if(!m||!/[぀-ヿ一-鿿]/.test(m))return NET_ERR;
@@ -182,7 +174,7 @@ let shown='loading';
 function syncSwitch(id){
  if(id)shown=id;
  const person=joinCode&&token&&(shown==='intro'||shown==='result'||shown==='fixed');
- // 共通QRで開いたときは、同じスマホで別の方を受付できるようにします（スマホを持っていない方の代わりなど）
+ // 共通QRなら、同じスマホで別の方も受付できます（スマホを持っていない方の代わりなど）
  $('switchperson').hidden=!person;
  $('switchperson').disabled=drawing||saving;
  const link=person&&view&&view.link;
@@ -192,21 +184,21 @@ function syncSwitch(id){
 function focusEl(el){if(el&&!el.hidden){try{el.focus({preventScroll:true});}catch(e){}}}
 function bad(msg){
  gen++;resetPerson();show('bad');msg=msg||'QRコードが無効です。受付にお声がけください。';
- // 通信の問題・受付の停止のときは、「QRコードが読み取れない」とは言わずに案内します
+ // 通信の問題・受付の停止は「QRコードが読み取れない」とは言わない
  const net=transient(msg),stop=/停止/.test(msg);
  $('badtitle').textContent=net?'読み込めませんでした':stop?'いまは受付していません':'席の情報が読み取れません';
  $('badlead').textContent=net?'電波の良い場所で、下のボタンからもう一度読み込んでください。':stop?'受付が再開されたら、もう一度読み取ってください。うまくいかないときは受付にお声がけください。':'お手数ですが、受付でお渡ししたQRコードをもう一度読み取ってください。うまくいかないときは受付にお声がけください。';
  $('badmsg').textContent=msg;$('drinkbox').hidden=true;
- // 押したボタン（「ほかの方の受付をする」など）が隠れてフォーカスが外れていたら、「もう一度読み込む」に移します（キーボード・読み上げの方のため）
+ // 押したボタンが隠れてフォーカスが外れたら「もう一度読み込む」へ（キーボード・読み上げの方のため）
  const a=document.activeElement;
  if(!a||a===document.body||!a.offsetParent)focusEl($('reload'));
 }
 // 前の方の入力・メッセージ・演出を片付けます（共通QRで次の方に替わるとき）
 function resetPerson(){
  stopRoll();drawing=false;saving=false;claiming=false;savedFocus='';
- otherOpen=false;$('otherinput').value='';msg('','');syncOther();
- $('drawerr').hidden=true;$('draw').disabled=false;$('draw').textContent='くじを引く';
+ otherOpen=false;$('otherinput').value='';msg('','');syncOther();resetDraw();
 }
+function resetDraw(){$('drawerr').hidden=true;$('draw').disabled=false;$('draw').textContent='くじを引く';}
 // 個別のトークンが使えなくなったとき（幹事がQRを作り直した・受付をやり直した）。共通QRなら名前選びに戻ります
 function badToken(m){
  if(joinCode){forget(token);$('joinsearch').value='';joinLoad('このスマホで前に受付した情報は使えなくなりました（受付のやり直し・QRの作り直しなど）。もう一度お名前を選んでください。');}
@@ -219,7 +211,7 @@ function setCommon(v){
  const f=$('fixedname');f.replaceChildren(document.createTextNode(v.name+' さんは '));
  const tag=document.createElement('span');tag.className='fixedtag';tag.textContent='固定席';
  f.append(tag,document.createTextNode(' です'));
- const ft=$('fixedtable');ft.hidden=!(v.kind==='fixed'&&v.table);ft.textContent=v.table?'お席：'+v.table:'';
+ const ft=$('fixedtable');ft.hidden=!v.table;ft.textContent=v.table?'お席：'+v.table:'';
 }
 // 卓の名前（「A卓」など）。卓を使っていないときは出しません
 function showTable(name,isRolling){
@@ -227,7 +219,6 @@ function showTable(name,isRolling){
  t.className='tablename'+(isRolling?' rolling':'');
  if(isRolling)t.setAttribute('aria-hidden','true');else t.removeAttribute('aria-hidden');
 }
-function seatWords(v){return v.table?v.table+' '+v.tableSeat+'番':v.seat+'番';}
 function showNumber(text,isRolling){
  const n=$('number');
  // くるくる回っている数字は読み上げません（結果だけを #announce で知らせます）
@@ -237,14 +228,16 @@ function showNumber(text,isRolling){
  n.className='number'+(isRolling?' rolling':(reduced()?'':' pop'));
 }
 function stopRoll(){
+ $('tablename').style.minHeight='';
  if(rolling){clearInterval(rolling);rolling=null;}
  if(replayTimer){clearTimeout(replayTimer);replayTimer=null;}
 }
 function startRoll(top){
  stopRoll();$('announce').textContent='抽選しています';
  top=Math.max(top||0,20);
- const tables=(view&&view.tables)||[];
- // 卓があるときは、卓の名前と卓の中の番号をくるくる回します
+ const tables=(view&&view.tables)||[],tn=$('tablename');
+ // 卓があるときは、卓の名前と卓の中の番号をくるくる回します。いちばん高い卓の名前の高さを確保し、下のドリンクの欄が上下しないようにします
+ if(tables.length){tn.hidden=false;tn.className='tablename rolling';tn.style.minHeight=Math.max(...tables.map(t=>{tn.textContent=t.name;return tn.offsetHeight;}))+'px';}
  const tick=tables.length
   ?()=>{const t=tables[Math.floor(Math.random()*tables.length)];showTable(t.name,true);showNumber(String(1+Math.floor(Math.random()*t.seats)),true);}
   :()=>{showTable('',true);showNumber(String(1+Math.floor(Math.random()*top)),true);};
@@ -254,23 +247,21 @@ function showSeat(v){
  stopRoll();show('result');
  showTable(v.table||'',false);
  showNumber(String(v.table?v.tableSeat:v.seat),false);
- $('announce').textContent=v.name+' さんのお席は '+seatWords(v)+' です。';
+ $('announce').textContent=v.name+' さんのお席は '+(v.table?v.table+' '+v.tableSeat:v.seat)+'番 です。';
  $('resulthint').hidden=false;$('again').hidden=false;
 }
 
 /* ---- 共通QR（全員同じQR）：名前を選ぶ ---- */
-// 受付した方のトークンと、このスマホの確認キーを覚えておきます（共通QRを作り直しても使えるよう、QRごとには分けません）
+// 受付した方のトークンとこのスマホの確認キー（共通QRを作り直しても使えるよう、QRごとには分けない）
 const TOKEN_KEY='sekikuji.join.token',DEVICE_KEY='sekikuji.device';
-// 書き込めなかったときは前の値も消します（容量いっぱいなどで。前の方のトークンが残って、あとで前の方の画面が開かないように）
+// 書き込めなければ前の値も消す（前の方のトークンが残って、前の方の画面が開かないように）
 function store(k,v){try{if(v)localStorage.setItem(k,v);else localStorage.removeItem(k);return true;}catch(e){try{localStorage.removeItem(k);}catch(e2){}return false;}}
 function load1(k){try{return localStorage.getItem(k)||'';}catch(e){return '';}}
 function remembered(){return load1(TOKEN_KEY);}
 function remember(t){store(TOKEN_KEY,t);}
-// このスマホで最初に受付した方（ふつうはスマホの持ち主）だけを覚えます。「ほかの方の受付をする」で続けて受付した方では置き換えません
-// （持ち主があとで同じQRを読み取ったときに、友人の画面が開いて友人のドリンクを変えてしまわないように）
-function rememberFirst(t){if(!remembered())remember(t);}
-// 個別QRで開いたとき：覚えているトークンが使えなくなっていたら（受付のやり直し・QRの作り直し）、いま開いたトークンに置き換えます
-// （置き換えないと、あとで共通QRを読み取ったときに自分の名前を選べなくなります）
+// 覚えるのは最初に受付した方（ふつうは持ち主）です。代わりに受付した友人で置き換えると、持ち主が読み取り直したとき友人の画面が開くため。
+// ただし覚えているトークンが使えなくなっていたら（受付のやり直し・QRの作り直し）、いま受付した・開いたトークンに置き換えます
+// （置き換えないと、あとで共通QRを読み取ったときに「使えなくなりました」と出て、自分の画面に戻れません）
 function rememberOwn(t){
  const r=remembered();
  if(!r||r===t){remember(t);return;}
@@ -283,7 +274,7 @@ function deviceKey(){
  if(/^[A-Za-z0-9]{16,64}$/.test(k))return k;
  if(!memDevice){
   const c='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789',a=new Uint8Array(24);
-  (window.crypto||window.msCrypto).getRandomValues(a);
+  crypto.getRandomValues(a);
   memDevice=Array.from(a,x=>c[x%62]).join('');
  }
  store(DEVICE_KEY,memDevice);
@@ -294,7 +285,7 @@ function joinStart(){
  if(t){
   token=t;show('loading');
   // 通信エラーのときは覚えたトークンを消さずに「もう一度読み込む」を出します
-  run('participantGet',[t],v=>render(v,true),m=>{if(/QRコード/.test(m)){forget(t);token='';$('joinsearch').value='';joinLoad('このスマホで前に受付した情報は使えなくなりました（受付のやり直し・QRの作り直しなど）。もう一度お名前を選んでください。');}else bad(m);});
+  run('participantGet',[t],v=>render(v,true),m=>/QRコード/.test(m)?badToken(m):bad(m));
  }else joinLoad();
 }
 function joinLoad(message){
@@ -323,7 +314,7 @@ function renderJoin(){
    const t=document.createElement('span');t.className='tag';t.textContent=p.mine?'このスマホで受付済み':'受付済み';b.append(t);
    if(p.mine){b.onclick=()=>{if(claiming)return;picked=p;show('loading');claim();};b.setAttribute('aria-label',p.name+'（このスマホで受付済み。押すと開きます）');}
    // 個別のQRコード・リンクで受付した方：押すと、そのQRコード・リンクから開くよう案内します（ご本人が名前を選べずに困らないように）
-   else if(p.link){b.className='claimed';b.onclick=()=>{const e=$('joinerr');e.textContent='「'+p.name+'」さんは、個別のQRコード（またはLINEなどで届いたリンク）ですでに受付済みです。ご本人の場合は、そのQRコード・リンクから開いてください。見つからないときは受付にお声がけください。';e.hidden=false;focusEl(e);};b.setAttribute('aria-label',p.name+'（受付済み。押すと開き方の案内が出ます）');}
+   else if(p.link){b.className='claimed';b.onclick=()=>{const e=$('joinerr');e.textContent='「'+p.name+'」さんは、個別のQRコード（またはLINEなどで届いたリンク）ですでに受付済みです。ご本人の場合は、そのQRコード・リンクから開いてください。見つからないときは受付にお声がけください。';e.hidden=false;focusEl(e);e.scrollIntoView({block:'center',behavior:reduced()?'auto':'smooth'});};b.setAttribute('aria-label',p.name+'（受付済み。押すと開き方の案内が出ます）');}
    else{b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
   }else b.onclick=()=>pick(p);
   items.push(b);
@@ -353,7 +344,7 @@ function claim(){
  run('joinClaim',[joinCode,who.id,deviceKey()],r=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';
   if(picked!==who)return; // 別の方を選び直していた
-  gen++;token=r.token;rememberFirst(r.token);picked=null;
+  gen++;token=r.token;rememberOwn(r.token);picked=null;
   render(r.view,true);
  },m=>{
   claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
@@ -368,26 +359,21 @@ function claim(){
 $('joinsearch').oninput=renderJoin;
 $('confirmyes').onclick=claim;
 $('confirmno').onclick=()=>{picked=null;$('joinerr').hidden=true;joinLoad();};
-$('switchperson').onclick=()=>{
- if(drawing||saving)return;
- // 覚えているトークン（最初に受付した方）はそのままです。次の方を受付しても置き換えません（持ち主が読み取り直すと、持ち主の画面に戻れるように）
- $('joinsearch').value='';joinLoad();
-};
+$('switchperson').onclick=()=>{if(drawing||saving)return;$('joinsearch').value='';joinLoad();};
 
 function load(){
  show('loading');$('drinkbox').hidden=true;
- // 個別QRで開いた方も、このスマホに覚えておきます（あとで共通QRを読み取ったときに、名前を選ばずに自分の画面へ戻れるように）
- // すでにほかの方を覚えていれば置き換えません。幹事画面の「この端末で開く」で試したとき（preview=1）は覚えません
+ // 個別QRの方も覚える（あとで共通QRから名前を選ばずに戻れるように）。幹事の「この端末で開く」（preview=1）では覚えない
  run('participantGet',[token],v=>{render(v,true);if(!preview)rememberOwn(token);},m=>bad(m));
 }
 // 画面全体をサーバーの状態から描き直す
 function render(v,full){
- view=v;setCommon(v);
+ renders++;view=v;setCommon(v);
  if(full){
   stopRoll();
   if(v.kind==='fixed'){show('fixed');focusEl($('fixedname'));}
   else if(v.seat!=null){showSeat(v);focusEl($('name2'));}
-  else{show('intro');$('draw').disabled=false;$('draw').textContent='くじを引く';$('drawerr').hidden=true;focusEl($('name'));}
+  else{show('intro');resetDraw();focusEl($('name'));}
  }
  renderDrink(v.kind==='fixed'||v.seat!=null);
  syncSwitch();
@@ -421,7 +407,7 @@ function draw(){
   stopRoll();$('announce').textContent='';show('intro');
   const showErr=()=>{const e=$('drawerr');e.textContent=m;e.hidden=false;btn.disabled=false;btn.textContent='もう一度くじを引く';focusEl(btn);};
   showErr();
-  // 幹事が区分を変えた・QRを作り直した などサーバー側が変わったときは、最新の状態を読み直して画面を切り替えます
+  // 幹事が区分を変えた・QRを作り直したなどのときは、最新の状態を読み直して画面を切り替える
   if(!transient(m)){
    btn.disabled=true;
    run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else{btn.disabled=false;const a=document.activeElement;if(!a||a===document.body)focusEl(btn);}});
@@ -431,12 +417,13 @@ function draw(){
 function replay(){
  if(!view||view.seat==null||rolling||drawing||shown!=='result'||$('again').hidden)return;
  const refocus=document.activeElement===$('again'); // 押したボタンを隠すので、演出のあとに戻します
- const anim=!(reduced()||document.hidden),t0=Date.now(),g=gen;
+ const anim=!(reduced()||document.hidden),t0=Date.now(),g=gen,r0=renders;
  $('again').hidden=true;
  if(anim)startRoll(view.tables&&view.tables.length?0:view.seat);
- // 幹事が席を空きに戻した（くじの引き直し）・区分を変えたときに、もう無い席を見せないよう、最新の状態を読み直してから結果を出します
+ // 席が空きに戻った・区分が変わったときにもう無い席を見せないよう、読み直してから出す
  const done=v=>{
   replayTimer=null;if(g!==gen||!view)return;
+  if(renders!==r0)v=view; // 読み直しを頼んだあとにドリンクの保存などで描き直していたら、そちらが新しいのでそのまま使います
   if(v.kind!=='fixed'&&v.seat!=null&&shown==='result'){
    render(v,false);showSeat(v);
    if(refocus&&(!document.activeElement||document.activeElement===document.body))focusEl($('again'));
@@ -456,18 +443,20 @@ function replay(){
 
 /* ---- ドリンク ---- */
 function isOther(d){return d!=null&&d!==UNDECIDED&&!(view.drinks||[]).includes(d);}
-function drinkLabel(d){return d===UNDECIDED?'未定（あとで決める）':d;}
 function renderDrink(visible){
  const box=$('drinkbox'),list=$('drinklist');box.hidden=!visible;
- // 描き直しても、押したボタンにフォーカスを残します（キーボード・読み上げの方のため）
+ // 描き直しても押したボタンにフォーカスを残す
  const a=document.activeElement,keep=(a&&list.contains(a)?(a.id||a.dataset.key||''):'')||(!saving?savedFocus:'');
  if(!saving)savedFocus=''; // 使わなかったときも消します（次の方の画面や、あとの描き直しで使わないように）
  if(!visible||!view)return;
  const d=view.drink==null?null:String(view.drink);
+ // 保存・エラーのあとに残す文は、そのときの登録と受付の状態に結び付け、あとでサーバーの状態が変わったら（幹事が変更・再開など）ふつうの表示に戻します
+ const m=$('drinkmsg'),st=d+'|'+view.drinkOpen;
+ if(m.dataset.keep==='1')m.dataset.keep=st;else if(m.dataset.keep&&m.dataset.keep!==st&&!saving)msg('','');
  if(!view.drinkOpen){
   $('drinkopen').hidden=true;$('drinkclosed').hidden=false;
-  $('drinkcurrent').textContent=d==null?'登録はありません':drinkLabel(d);
-  // 押したボタンが締め切りの表示に替わって消えたときは（保存しようとしたら締め切られていた）、締め切りの文にフォーカスを移して知らせます
+  $('drinkcurrent').textContent=d==null?'登録はありません':d===UNDECIDED?'未定（あとで決める）':d;
+  // 押したボタンが締め切りの表示に替わって消えたら、締め切りの文にフォーカスを移して知らせる
   if(keep&&(!document.activeElement||document.activeElement===document.body))focusEl($('drinkclosedmsg'));
   return;
  }
@@ -504,7 +493,7 @@ function syncOther(){
  $('otherform').hidden=!otherOpen;
  const o=$('otherbtn');if(o)o.setAttribute('aria-expanded',String(otherOpen));
 }
-// 保存に失敗したとき、押したボタン（その他の入力中なら入力欄）へフォーカスを戻します（保存中に押せなくしたので外れています）
+// 保存に失敗したら、押したボタン（その他の入力中なら入力欄）へフォーカスを戻す
 function restoreSaved(){
  const k=savedFocus;savedFocus='';
  if(!k||(document.activeElement&&document.activeElement!==document.body))return;
@@ -519,6 +508,8 @@ function msg(text,cls,keep){
  const m=$('drinkmsg');m.textContent=text;m.className='msg'+(cls?' '+cls:'');
  if(keep)m.dataset.keep='1';else delete m.dataset.keep;
 }
+// 幹事が席を空きに戻した・区分を変えた などで画面と違っていたら、画面全体を描き直します
+const moved=v=>!view||v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat;
 function save(drink){
  if(saving||!view)return;
  drink=clean(drink);
@@ -528,20 +519,15 @@ function save(drink){
  saving=true;setBusy(true);msg('保存しています…','',true);
  run('participantSetDrink',[token,drink,(view&&view.drinkAt)||''],v=>{
   saving=false;
-  // 幹事が席を空きに戻した・区分を変えた などで画面と違っていたら、画面全体を描き直します
-  const changed=!view||v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat;
   if(!isOther(v.drink))$('otherinput').value='';
   otherOpen=false;
   msg((v.drink===UNDECIDED?'「未定」':'「'+v.drink+'」')+'で登録しました。変更もできます。','ok',true);
-  render(v,changed);
+  render(v,moved(v));
  },m=>{
-  // 締め切り・QR無効・ほかの画面での変更のときは、最新の状態を読み直すまで押せないままにします
-  const reload=/締め切|QRコード|ほかの画面で/.test(m);
-  if(!reload){saving=false;setBusy(false);restoreSaved();}
   msg(m,'ng',true);
-  const reloadFail=m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else{setBusy(false);restoreSaved();}};
-  if(/締め切|ほかの画面で/.test(m))run('participantGet',[token],v=>{saving=false;render(v,v.kind!==view.kind||v.seat!==view.seat||v.table!==view.table||v.tableSeat!==view.tableSeat);},reloadFail);
-  else if(/QRコード/.test(m))run('participantGet',[token],v=>{saving=false;render(v,true);},reloadFail);
+  if(!/締め切|QRコード|ほかの画面で/.test(m)){saving=false;setBusy(false);restoreSaved();return;}
+  // 締め切り・QR無効・ほかの画面での変更のときは、最新の状態を読み直すまで押せないままにします
+  run('participantGet',[token],v=>{saving=false;render(v,/QRコード/.test(m)||moved(v));},m2=>{saving=false;if(/QRコード/.test(m2))badToken(m2);else{setBusy(false);restoreSaved();}});
  });
 }
 $('otherform').onsubmit=e=>{e.preventDefault();save($('otherinput').value);};
