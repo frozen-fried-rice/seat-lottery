@@ -1209,7 +1209,7 @@ async function step(name, fn) {
       await ph.evaluate(() => localStorage.removeItem('sekikuji.join.token'));
       await open(ph, { j: code });
       await ph.locator('#join').waitFor({ state: 'visible' });
-      assert.match(await ph.getAttribute('#joinsearch', 'placeholder'), /例：山田/);
+      assert.doesNotMatch(await ph.getAttribute('#joinsearch', 'placeholder'), /やま/, '例にかなを出さない（漢字の名前に当たらないため）');
       await ph.fill('#joinsearch', 'ひきなお');
       assert.match(await text(ph, '#joinlist'), /該当するお名前がありません。[\s\S]*漢字の一部/);
       await ph.fill('#joinsearch', '引直');
@@ -1584,6 +1584,13 @@ async function step(name, fn) {
       // ドリンクを変えると、送る内容も変わる
       await ph.click('#drinklist button:nth-child(2)');
       await ph.waitForFunction(m => decodeURIComponent(document.getElementById('lineshare').href).includes('1杯目：' + m), menu[1]);
+      // 「もう一回くじを回してみる」の演出中も出したまま（席は変わらないので、下の欄が上下しない）
+      await ph.click('#again');
+      await ph.waitForTimeout(300);
+      assert.equal(await ph.evaluate(() => rolling !== null), true); // eslint-disable-line no-undef
+      assert.equal(await ph.isVisible('#linebox'), true, '演出中も出したまま');
+      await ph.waitForSelector('#again:not([hidden])', { timeout: 10000 });
+      assert.equal(await ph.isVisible('#linebox'), true);
       await ph.locator('#linebox').scrollIntoViewIfNeeded();
       await shot(ph, 'line-share');
       await ph.context().close();
@@ -1598,6 +1605,36 @@ async function step(name, fn) {
       assert.ok(txt.includes('お席：' + t0 + '（固定席）'), txt);
       assert.ok(txt.includes('?t=' + byName('送信 来賓').token), txt);
       await pf.context().close();
+    });
+
+    await step('安定版確認) 幹事画面：修正で選んだ席がほかの方に決まったら知らせて保存を止める／席を決めた固定席の方を数え違えない', async () => {
+      callServer(ctx, 'adminAddPeople', [KEY, ['確認 来賓一', '確認 来賓二'], 'fixed']);
+      const t0 = state().settings.tables[0], label = 'rel-admin';
+      const pg = await newPage(browser, label, { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows tr', { hasText: '確認 来賓一' }).waitFor();
+      faults.push({ label, name: 'adminGetState', mode: 'delay', ms: 1500 }); // 開いたときの読み直しが遅れる（その間に、ほかの画面で同じ席が決まる）
+      await pg.locator('#drinkrows tr', { hasText: '確認 来賓一' }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#editdialog[open]').waitFor();
+      await pg.selectOption('#edittable', t0.name);
+      const opt = await pg.evaluate(() => [...document.getElementById('editseat').options].filter(o => o.value && !o.disabled).pop().value);
+      await pg.selectOption('#editseat', opt);
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('確認 来賓二').id, { table: t0.name, seat: Number(opt) }]); // その間にほかの画面で同じ席を決めた
+      await pg.waitForFunction(() => !document.getElementById('editerror').hidden, null, { timeout: 8000 });
+      assert.match(await text(pg, '#editerror'), /確認 来賓二さんに決まりました/);
+      await pg.click('#editform button[type=submit]');
+      await pg.waitForTimeout(400);
+      assert.equal(await pg.isVisible('#editdialog'), true, '一度は保存を止める');
+      assert.match(await text(pg, '#editerror'), /もう一度「保存」/);
+      await pg.click('#editform button[type=submit]'); // このままでよければ、もう一度押すと保存できる
+      await waitStatus(pg, /確認 来賓一さんを修正しました/);
+      assert.deepEqual([byName('確認 来賓一').seat, byName('確認 来賓一').table], [null, t0.name]);
+      // 「席が決まった方」はくじを引く方だけを数える
+      await pg.click('#tab-qr');
+      const sm = state().summary, seatedLottery = state().people.filter(p => p.kind === 'lottery' && p.seat != null).length;
+      assert.match(await text(pg, '#view-qr'), new RegExp('席が決まった方 ' + seatedLottery + ' / ' + sm.lottery + '人'));
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('確認 来賓二').id, { seat: null }]);
+      await pg.context().close();
     });
 
     await step('ページのエラー・コンソールエラーなし', async () => {

@@ -2,7 +2,7 @@
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>席くじ 幹事画面</title><style>
 :root{font-family:system-ui,-apple-system,'Noto Sans JP',sans-serif;color:#182d4a;background:#f3f6fb;font-size:16px}
 *{box-sizing:border-box}
-body{margin:0;background:#f3f6fb}
+body{margin:0}
 button,input,select,textarea{font:inherit}
 button,.btn{cursor:pointer;border:0;border-radius:12px;padding:12px 18px;font-weight:700;min-height:48px;background:#e9eff8;color:#183659;display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;font-size:16px;line-height:1.3}
 button:hover,.btn:hover{filter:brightness(.96)}
@@ -31,7 +31,6 @@ main{max-width:1180px;margin:8px auto 16px;padding:0 22px}
 .warn{background:#fff8e6;border:1px solid #f0d79a;color:#7a5410;padding:14px 16px;border-radius:12px;margin-bottom:16px;font-size:15px;line-height:1.7}
 .panel{background:#fff;border:1px solid #dfe6ef;border-radius:20px;padding:24px;margin-bottom:18px;box-shadow:0 10px 35px #213a630a}
 .panel h2{font-size:20px;margin:0 0 6px}
-.panel h3{font-size:16px;margin:24px 0 8px}
 .hint{color:#617087;font-size:14px;line-height:1.8;margin:6px 0}
 .listhead{display:flex;justify-content:space-between;gap:14px;align-items:flex-start;flex-wrap:wrap;margin-bottom:16px}
 .actions{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
@@ -69,7 +68,7 @@ tbody tr:hover{background:#f8fafd}
 td.seat{font-size:20px;font-weight:800;color:#193961;font-variant-numeric:tabular-nums}
 td.seat.soft{font-size:15px;color:#8a97a9;font-weight:700}
 td.seat.fixed{font-size:14px;color:#44566f}
-td.muted,span.muted{color:#98a4b5}
+.muted{color:#98a4b5}
 td.time{font-size:14px;color:#617087;font-variant-numeric:tabular-nums}
 td.act{text-align:right}
 td.act .actions{justify-content:flex-end;gap:6px}
@@ -99,7 +98,7 @@ button.dirty{background:#2255aa;color:#fff}
 @media(max-width:700px){.joinwrap{grid-template-columns:1fr}.joinwrap .qrbox{margin:0 auto}}
 .stats{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 4px}
 #loading{text-align:center;padding:80px 16px;color:#617087}
-#loading .spin,.busyind .spin{display:inline-block;width:18px;height:18px;border:3px solid #c9d5e6;border-top-color:#2255aa;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:8px}
+.spin{display:inline-block;width:18px;height:18px;border:3px solid #c9d5e6;border-top-color:#2255aa;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-3px;margin-right:8px}
 .busyind{font-size:13px;color:#597089;font-weight:700;visibility:hidden}
 body.busy .busyind{visibility:visible}
 #loading.failed .spin{display:none}
@@ -114,8 +113,8 @@ dialog p{line-height:1.8}
 #printsheet{display:none}
 footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;color:#65738a;line-height:1.8}
 #releasewrap,#clearseatwrap,#askoptwrap{white-space:normal;align-items:flex-start;line-height:1.6;padding-top:8px}
-#releasewrap input,#clearseatwrap input,#askoptwrap input{margin-top:3px;flex:none}
-.hint,#status,dialog p,#errortext,.urlbox,.modebox{overflow-wrap:anywhere}
+#releasewrap input,#clearseatwrap input,#askoptwrap input{margin-top:3px}
+.hint,#status,dialog p,#errortext,.modebox{overflow-wrap:anywhere}
 .tablecards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
 .tcard{background:#fff;border:1px solid #dfe6ef;border-radius:14px;padding:14px 16px}
 .tcard h4{margin:0 0 8px;font-size:18px;color:#193961;display:flex;justify-content:space-between;gap:8px;align-items:baseline;overflow-wrap:anywhere}
@@ -177,7 +176,7 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
  .tables .tsec{break-inside:avoid;page-break-inside:avoid;border:1px solid #9aa8bb;border-radius:3mm;padding:4mm 5mm;margin:0 0 5mm}
  .tables .tsec h2{font-size:16pt;margin:0 0 2mm;color:#000}
  .tables .tsec .tot{font-size:12pt;font-weight:700;margin:0 0 3mm}
- .tables .tsec table{width:100%;border-collapse:collapse;font-size:11pt}
+ .tables .tsec table{font-size:11pt}
  .tables .tsec td{border-top:1px solid #ccd;padding:1.2mm 2mm}
  .tables .ev{font-size:11pt;margin:0 0 4mm;color:#333}
  .poster .qrcard .note{font-size:15pt;margin:8mm 0 0;line-height:1.8;white-space:pre-line}
@@ -522,9 +521,10 @@ function qrSvgCached(text){
  if(!qrCache.has(text)){let svg=null;try{svg=qrSvg(text);}catch(e){}qrCache.set(text,svg);}
  return qrCache.get(text);
 }
-// QRを box に出します（出せないときは理由を出して null を返します）
 // 自動で取れたURLがテスト用（/dev）だったとき（参加者は開けないので、QRには使いません）
 const DEV_URL_MSG='いま自動で取得できたのはテスト用のURL（/dev で終わるもの）です。このURLは参加者が開けないため、QRコードを作れません。Apps Script の「デプロイ」→「デプロイを管理」にある /exec で終わるURLを、「名簿・設定」の「QR用のURL」に貼り付けて保存してください。';
+const NO_URL_MSG=$('qrurlwarn').textContent; // URLが無いときの案内（HTMLに書いた文）
+// QRを box に出します（出せないときは理由を出して null を返します）
 function showQr(box,url){
  const svg=url?qrSvgCached(url):null;
  box.replaceChildren();
@@ -575,8 +575,8 @@ async function act(name,args,onOk){
   acting--;busy--;lastActDone=n;setBusy();render();
   const a=document.activeElement;
   if(before&&before!==document.body&&before.isConnected&&!before.disabled&&!before.closest('[hidden]')&&(!a||a===document.body)&&(!before.closest('dialog')||before.closest('dialog').open))before.focus({preventScroll:true});
-  if(!acting&&manualPending&&!refreshing){manualPending=false;refresh(true,true,true);} // 操作の途中で待たせていた「更新」を、操作の結果を出してから読みます（操作の結果の文・エラーの表示はそのまま）
-  else if(!acting&&reloadPending&&!refreshing){reloadPending=false;refresh(false,true);} // 読み込み中に待たせた、ほかの画面での変更のあとの読み直し
+  if(manualPending&&!refreshing){manualPending=false;refresh(true,true,true);} // 操作の途中で待たせていた「更新」を、操作の結果を出してから読みます（操作の結果の文・エラーの表示はそのまま）
+  else if(reloadPending&&!refreshing){reloadPending=false;refresh(false,true);} // 読み込み中に待たせた、ほかの画面での変更のあとの読み直し
  }
 }
 /* 自動・手動の読み込み */
@@ -652,8 +652,9 @@ function staged(p){return p.kind==='fixed'&&p.seat!=null;}
 function seatText(p){return staged(p)?'固定 '+placeText(p):p.kind==='fixed'?(p.table?'固定（'+p.table+'）':(p.fixedLabel||'固定席')):p.seat==null?'未':placeText(p);}
 function stateText(p){return staged(p)?'固定席（'+placeText(p)+(p.drawnAt?'':'・演出前')+'）':p.kind==='fixed'?(p.table?'固定席（'+p.table+'）':'固定席'):p.seat==null?'未抽選':placeText(p);}
 function tsLabel(p,g){return p.tableSeat!=null&&!g.extra?p.tableSeat+'番'+(staged(p)?'（固定）':''):p.kind==='fixed'?'固定':'—';}
+function seatCls(p){return p.kind==='fixed'?' fixed':p.seat==null?' soft':'';}
 function hasTables(){return !!(S&&S.settings.tables.length);}
-function drinkText(p){return p.drink?p.drink:'未登録';}
+function drinkText(p){return p.drink||'未登録';}
 function timeText(t){if(!t)return '';const m=String(t).match(/(\d{1,2}:\d{2})(:\d{2})?/);return m?m[1]:String(t);}
 function linkFor(p){const u=S&&S.settings.appUrl;return u&&p.token?u+(u.includes('?')?'&':'?')+'t='+encodeURIComponent(p.token):'';}
 // 並び順：席番号順。卓のある固定席の方は、その卓の最後に並べます
@@ -697,9 +698,9 @@ function render(){
  $('eventhead').textContent=st.event||'';$('eventhead').hidden=!st.event;
  const ph='例：山田／'+(hasTables()?(st.tables[0].name+' 3'):'12'); // 卓があるときは、画面に出ている「A卓 3」の形で探せます
  for(const id of ['drinksearch','qrsearch'])if($(id).placeholder!==ph)$(id).placeholder=ph;
- const over=sm.lottery-st.seats;
+ const held=S.people.filter(staged).length,free=st.seats-held,over=sm.lottery-free; // 固定席の方に決めた席は、くじには出ません
  const warns=[];
- if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。'+(hasTables()?'「名簿・設定」の卓の設定で席数を増やすか、固定席に変えてください。':'「名簿・設定」で席数を増やすか、固定席に変えてください。'));
+ if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+free+'席です'+(held?'（固定席の方に決めた'+held+'席を除く）':'')+'。'+over+'人分の席が足りません。'+(hasTables()?'「名簿・設定」の卓の設定で席数を増やすか、固定席に変えてください。':'「名簿・設定」で席数を増やすか、固定席に変えてください。'));
  const who=list=>list.slice(0,5).map(p=>p.name+'さん（「'+p.badSeat+'」）').join('、')+(list.length>5?' ほか'+(list.length-5)+'人':'');
  const bad=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&!p.dupSeat),dup=S.people.filter(p=>p.badSeat&&p.dupSeat),fxb=S.people.filter(p=>p.badSeat&&p.kind==='fixed'&&!p.dupSeat);
  if(bad.length)warns.push('「参加者」シートの席番号を読み取れない方がいます：'+who(bad)+'。直すまでは未抽選として扱います。シートで「'+(hasTables()?'A卓 3':'12')+'」のように直すか、その方の「修正」で消してください。'+(hasTables()?'（卓に無い番号・席数より大きい番号も読み取れません）':'（抽選する席の数より大きい番号も読み取れません）'));
@@ -737,7 +738,7 @@ function renderUpdated(){
 /* 卓ごとの配膳：卓ごとに、だれが何を飲むか・ドリンクごとの杯数 */
 function tableGroups(){
  const menu=S.settings.drinks;
- const groups=S.settings.tables.map(t=>({name:t.name,seats:t.seats,people:[],extra:false}));
+ const groups=S.settings.tables.map(t=>({name:t.name,seats:t.seats,people:[]}));
  const by=Object.create(null);groups.forEach(g=>{by[g.name]=g;});
  const noseat={name:'まだ席が決まっていない方',people:[],extra:true},notable={name:'卓が決まっていない固定席の方',people:[],extra:true};
  for(const p of sorted(S.people)){
@@ -785,7 +786,7 @@ function renderDrinks(){
  if(!S.people.length){empty(box,'まだ名簿がありません。「名簿・設定」から登録してください。');return;}
  if(!list.length){empty(box,only&&!$('drinksearch').value.trim()?'未登録の方はいません。':noHit($('drinksearch').value));return;}
  const rows=list.map(p=>el('tr',null,
-  el('td',{class:'seat'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:seatText(p)}),
+  el('td',{class:'seat'+seatCls(p),text:seatText(p)}),
   el('td',{text:p.name}),
   el('td',{class:p.drink?null:'muted',text:drinkText(p)}),
   el('td',{class:'time hide-sm',text:timeText(p.drinkAt),title:p.drinkAt||null}),
@@ -803,7 +804,7 @@ function renderJoin(){
  $('joinstats').replaceChildren(el('span',{class:'tag ok',text:'受付済み '+claimed+' / '+S.people.length+'人'}),el('span',{class:'tag'+(S.people.length-claimed?' wait':''),text:'まだの方 '+(S.people.length-claimed)+'人'}));
  const svg=showQr($('joinqr'),url);
  if($('joinlink').value!==url)$('joinlink').value=url;
- $('joinprint').disabled=!svg;$('joincopy').disabled=!url;$('joinshow').disabled=!svg;
+ $('joinprint').disabled=$('joinshow').disabled=!svg;$('joincopy').disabled=!url;
  setHref($('joinopenlink'),url);
 }
 function renderQr(){
@@ -811,15 +812,14 @@ function renderQr(){
  renderJoin();
  $('qrevent').textContent=st.event||'（未設定）';
  $('qrurlwarn').hidden=!!st.appUrl;
- $('qrurlwarn').textContent=st.devUrl?DEV_URL_MSG:'QRコードに入れるWebアプリのURLが取得できません。先にWebアプリとしてデプロイするか、「名簿・設定」の「QR用のURL」を設定してください。';
+ $('qrurlwarn').textContent=st.devUrl?DEV_URL_MSG:NO_URL_MSG;
  const pending=pendingCount();
  const stats=$('qrstats');stats.replaceChildren(
-  el('span',{class:'tag ok',text:'席が決まった方 '+sm.seated+' / '+sm.lottery+'人'}),
+  el('span',{class:'tag ok',text:'席が決まった方 '+S.people.filter(p=>p.kind==='lottery'&&p.seat!=null).length+' / '+sm.lottery+'人'}),
   el('span',{class:'tag'+(pending?' wait':''),text:'未抽選 '+pending+'人'}),
   el('span',{class:'tag',text:'空いている席 '+sm.seatsLeft+'席'}),
   el('span',{class:'tag',text:'固定席 '+sm.fixed+'人'}));
- $('printbtn').disabled=!st.appUrl||!S.people.length;
- $('linkcsv').disabled=!st.appUrl||!S.people.length;
+ $('printbtn').disabled=$('linkcsv').disabled=!st.appUrl||!S.people.length;
  $('drawall').disabled=!pending;
  const box=$('qrrows');
  if(!S.people.length){empty(box,'まだ名簿がありません。「名簿・設定」から登録してください。');return;}
@@ -831,7 +831,7 @@ function renderQr(){
    p.kind==='lottery'&&p.seat==null?el('button',{class:'small',text:'代わりに引く','data-fk':'q:draw:'+p.id,'aria-label':p.name+'さんの代わりにくじを引く',disabled:!sm.seatsLeft,onclick:()=>drawOne(p.id)}):null);
   const tag=p.kind==='fixed'?el('span',{class:'tag',text:stateText(p)}):p.seat==null?el('span',{class:'tag wait',text:'未抽選'}):el('span',{class:'tag ok',text:placeText(p)});
   return el('tr',null,
-   el('td',{class:'seat hide-sm'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:p.kind==='fixed'&&p.seat==null?(p.table||p.fixedLabel||'—'):p.seat==null?'—':(p.table?p.table+' '+p.tableSeat:String(p.seat))}),
+   el('td',{class:'seat hide-sm'+seatCls(p),text:p.kind==='fixed'&&p.seat==null?(p.table||p.fixedLabel||'—'):p.seat==null?'—':(p.table?p.table+' '+p.tableSeat:String(p.seat))}),
    el('td',{text:p.name}),
    el('td',null,tag,p.claimedAt?el('span',{class:'tag ok',text:'受付済み',title:'受付：'+p.claimedAt,style:'margin-left:4px'}):null),
    el('td',{class:(p.drink?'':'muted ')+'hide-sm',text:drinkText(p)}),
@@ -899,7 +899,7 @@ $('bulkadd').onclick=()=>{
 async function reset(scope,title,msg,done){
  if(await ask(title,msg,'消す',true))act('adminReset',[scope],()=>ok(done));
 }
-$('resetseats').onclick=()=>reset('seats','席だけ消す','全員の席と抽選日時を消して、未抽選に戻します。名簿・ドリンク・受付済みの記録はそのままです（受付をやり直すときは、各自の「修正」から）。元に戻せません。','席を消しました。');
+$('resetseats').onclick=()=>reset('seats','席だけ消す','全員の席と抽選日時を消して、未抽選に戻します（席を決めておいた固定席の方は、席はそのままで演出だけやり直せます）。名簿・ドリンク・受付済みの記録はそのままです（受付をやり直すときは、各自の「修正」から）。元に戻せません。','席を消しました。');
 $('resetdrinks').onclick=()=>reset('drinks','ドリンクだけ消す','全員のドリンクと登録日時を消します。名簿と席はそのままです。元に戻せません。','ドリンクを消しました。');
 $('resetall').onclick=()=>reset('all','名簿ごと消す','名簿・席・ドリンクをすべて消します（設定は残ります。ドリンクの受付・共通QRでの受付は「受付中」に戻ります）。配ったQRコード（個別QR・共通QR）も使えなくなり、共通QRは新しくなります。元に戻せません。','名簿ごと消しました。');
 
@@ -925,6 +925,7 @@ function openEdit(id){
  const p=person(id);if(!p)return;
  editing={id,name:p.name,kind:p.kind,drink:p.drink||null,fk:lastFk};
  for(const f of EDIT_FIELDS)delete $(f).dataset.touched;
+ delete $('editseat').dataset.lost;
  fillEdit(p);
  $('editclearseat').checked=false;$('editrelease').checked=false;
  $('editerror').hidden=true;
@@ -976,20 +977,27 @@ function fillSeats(){
  const want=ss.dataset.touched?ss.value:editing.seat;
  const sig=JSON.stringify(opts.map(o=>[o.value,o.text,o.disabled]));
  if(ss.dataset.sig!==sig){ss.replaceChildren(...opts);ss.dataset.sig=sig;}
- if(keep(want))ss.value=want;else{ss.value='';if(ss.dataset.touched&&want)delete ss.dataset.touched;}
+ const lost=[...ss.options].find(o=>o.value===want&&o.disabled);
+ if(keep(want))ss.value=want;
+ else{
+  ss.value='';
+  if(ss.dataset.touched&&want)delete ss.dataset.touched;
+  // 選んでいた席が、開いている間にほかの方に決まったら知らせ、選び直すまで保存しません（黙って「番号なし」で保存しないように）
+  if(lost){ss.dataset.lost='1';$('editerror').textContent='選んでいた席（'+(tb?tname+' ':'')+(Number(want)-start)+'番）は、'+taken.get(Number(want))+'さんに決まりました。席を選び直してください。';$('editerror').hidden=false;}
+ }
 }
 function kindHint(){
  const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
  $('edittablewrap').hidden=!(toFixed&&hasTables());
  $('editseatwrap').hidden=!toFixed;
- $('editkindhint').textContent=p&&toFixed&&p.kind==='lottery'&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります（下で席の番号を選び直せます）。':toFixed?'席の番号を決めると、くじの演出のあとにその席が出ます。番号なしなら、くじは引かずドリンクだけ登録します。':'くじを引いて席を決める方です。';
+ $('editkindhint').textContent=p&&!toFixed&&p.kind==='fixed'&&p.seat!=null?'くじを引く方に変えると、決めておいた席（'+placeText(p)+'）は空きに戻ります。':p&&toFixed&&p.kind==='lottery'&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります（下で席の番号を選び直せます）。':toFixed?'席の番号を決めると、くじの演出のあとにその席が出ます。番号なしなら、くじは引かずドリンクだけ登録します。':'くじを引いて席を決める方です。';
  $('clearseatwrap').hidden=!(p&&(p.kind==='lottery'&&(p.seat!=null||p.badSeat)&&!toFixed||p.kind==='fixed'&&p.badSeat&&toFixed));
  $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+placeText(p)+'）を空きに戻す':p&&p.badSeat?(p.kind==='fixed'?'席番号の列に書かれた内容':p.dupSeat?'ほかの方と重なっている席番号':'読み取れない席番号')+'（「'+p.badSeat+'」）を消す':'席を空きに戻す';
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
-$('edittable').onchange=()=>{$('edittable').dataset.touched='1';fillSeats();};
-$('editseat').onchange=()=>{$('editseat').dataset.touched='1';};
+$('edittable').onchange=()=>{$('edittable').dataset.touched='1';if($('editseat').dataset.lost){delete $('editseat').dataset.lost;$('editerror').hidden=true;}fillSeats();}; // 卓を選び直したら、席が取られた知らせは消します
+$('editseat').onchange=()=>{$('editseat').dataset.touched='1';delete $('editseat').dataset.lost;};
 $('editcancel').onclick=()=>$('editdialog').close();
 $('editform').onsubmit=e=>{
  e.preventDefault();
@@ -1005,6 +1013,8 @@ $('editform').onsubmit=e=>{
  if($('editclearseat').checked&&!$('clearseatwrap').hidden)patch.clearSeat=true;
  if($('editrelease').checked&&!$('releasewrap').hidden)patch.releaseClaim=true;
  if(!$('edittablewrap').hidden){const tv=$('edittable').value;if(tv!==editing.table||patch.kind==='fixed')patch.table=tv||null;}
+ // 一度だけ止めます（もう一度「保存」を押せば、そのまま「番号なし」などで保存できます）
+ if(!$('editseatwrap').hidden&&$('editseat').dataset.lost){delete $('editseat').dataset.lost;$('editerror').textContent='選んでいた席は、ほかの方に決まりました。席を選び直すか、このままでよければもう一度「保存」を押してください。';$('editerror').hidden=false;$('editseat').focus();return;}
  if(!$('editseatwrap').hidden){const sv=$('editseat').value;if(sv!==editing.seat||patch.kind==='fixed'||patch.table!==undefined)patch.seat=sv?Number(sv):null;}
  if(!Object.keys(patch).length){$('editdialog').close();return;}
  const id=editing.id;
@@ -1072,8 +1082,9 @@ $('joinreset').onclick=async()=>{
  act('adminResetJoinCode',[],()=>{qrCache.clear();ok('共通QRコードを作り直しました。ポスターを印刷し直し、「大きく表示」のタブを開いていれば開き直してください。');});
 };
 /* プロジェクターに映す用：共通QRだけの画面を別のタブで開きます（この画面のURLには幹事用の合言葉が入っているため、そのまま映さないように） */
+function joinSvg(){const url=S&&S.settings.joinUrl;return url?qrSvgCached(url):null;}
 $('joinshow').onclick=()=>{
- const url=S&&S.settings.joinUrl,svg=url?qrSvgCached(url):null;
+ const svg=joinSvg();
  if(!svg)return;
  const esc=t=>String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const html='<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>席くじ 受付QR</title><style>'+
@@ -1090,10 +1101,9 @@ $('joinshow').onclick=()=>{
  ok('共通QRを別のタブで開きました。そのタブをプロジェクターに映してください（この幹事画面は映さないでください）。');
 };
 $('joinprint').onclick=()=>{
- const url=S&&S.settings.joinUrl,svg=url?qrSvgCached(url):null;
+ const svg=joinSvg();
  if(!svg)return;
- const root=$('printsheet');root.replaceChildren();root.className='poster';
- root.append(qrCard('席くじ・ドリンク受付',svg,'スマホのカメラで読み取って、ご自身のお名前を選んでください。\nくじで席が決まり、1杯目のドリンクを登録できます。'));
+ sheet('poster').append(qrCard('席くじ・ドリンク受付',svg,'スマホのカメラで読み取って、ご自身のお名前を選んでください。\nくじで席が決まり、1杯目のドリンクを登録できます。'));
  doPrint();
 };
 
@@ -1103,6 +1113,8 @@ $('joinprint').onclick=()=>{
  * スマホの Safari は afterprint が届かないことがあるので、1分たったら片付けます。
  */
 function qrCard(nm,svg,note){const h=document.createElement('div');h.innerHTML=svg;return el('div',{class:'qrcard'},S.settings.event?el('p',{class:'ev',text:S.settings.event}):null,el('p',{class:'nm',text:nm}),h.firstElementChild,el('p',{class:'note',text:note}));}
+// 印刷用の紙面を空にして、種類（class）を付けます
+function sheet(cls){const r=$('printsheet');r.replaceChildren();r.className=cls;return r;}
 let printEnd=null;
 function doPrint(){
  if(printEnd)printEnd(false);
@@ -1117,7 +1129,7 @@ function doPrint(){
 /* 卓ごとの配膳表（A4に卓ごと） */
 $('tableprint').onclick=()=>{
  if(!S||!hasTables())return;
- const root=$('printsheet');root.replaceChildren();root.className='tables';
+ const root=sheet('tables');
  root.append(el('p',{class:'ev',text:(S.settings.event?S.settings.event+'　':'')+'1杯目のドリンク 卓ごとの配膳表（'+new Date().toLocaleString('ja-JP')+'）'}));
  for(const g of tableGroups()){
   const tot=g.counts.map(x=>x[0]+' '+x[1]).concat(g.undecided?['未定 '+g.undecided]:[],g.none?['未登録 '+g.none]:[]).join('　／　')||'（なし）';
@@ -1131,7 +1143,7 @@ $('tableprint').onclick=()=>{
 /* 印刷・CSV */
 $('printbtn').onclick=()=>{
  if(!S||!S.settings.appUrl)return;
- const root=$('printsheet');root.replaceChildren();root.className='';
+ const root=sheet('');
  let missing=0;
  for(const p of S.people){
   const link=linkFor(p),svg=link?qrSvgCached(link):null;
@@ -1153,7 +1165,7 @@ function stamp(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getF
 $('csv').onclick=()=>{
  const tb=hasTables();
  const rows=[(tb?['卓','卓内の席']:[]).concat(['席番号','区分','お名前','ドリンク','ドリンク登録時刻'])];
- for(const p of sorted(S.people))rows.push((tb?[p.table||(p.kind==='fixed'?'未設定':'未抽選'),p.kind==='fixed'&&p.seat==null?'固定':p.tableSeat==null?'':p.tableSeat]:[]).concat([p.kind==='fixed'&&p.seat==null?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,p.drink||'未登録',p.drinkAt||'']));
+ for(const p of sorted(S.people))rows.push((tb?[p.table||(p.kind==='fixed'?'未設定':'未抽選'),p.kind==='fixed'&&p.seat==null?'固定':p.tableSeat==null?'':p.tableSeat]:[]).concat([p.kind==='fixed'&&p.seat==null?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,drinkText(p),p.drinkAt||'']));
  downloadCsv(rows,'席くじ-ドリンク一覧-'+stamp()+'.csv');
  ok('CSVを保存しました。');
 };
@@ -1177,7 +1189,7 @@ if(typeof google==='undefined'||!google.script||!google.script.url){
 }
 function firstLoad(){
  $('loadingtext').textContent='読み込み中…';$('retry').hidden=true;$('loading').classList.remove('failed');
- refresh(true).then(()=>{if(S){$('status').textContent='';return;}$('loadingtext').textContent='読み込めませんでした。';$('retry').hidden=false;$('loading').classList.add('failed');});
+ refresh(true).then(()=>{if(S){ok('');return;}$('loadingtext').textContent='読み込めませんでした。';$('retry').hidden=false;$('loading').classList.add('failed');});
 }
 $('retry').onclick=firstLoad;
 </script></body></html>

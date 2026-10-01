@@ -211,14 +211,14 @@ function adminUpdatePerson(key, id, patch) { return api_(function () {
         if (d === null) { p.drink = null; p.drinkAt = null; }
         else { p.drink = d; p.drinkAt = now_(); }
       }
+      if (patch.clearSeat === true) clearSeat_(p); // 席の指定（下）より先に消します（同じ保存で選んだ席を消さないように）
       if (patch.table !== undefined) {
         // 固定席の方の卓（null で未設定）
         if (p.kind !== 'fixed') throw appErr_('卓を指定できるのは固定席の方だけです（くじを引く方の卓は、くじで決まります）。');
         if (patch.table === null || patch.table === '') p.table = null;
         else {
-          const names = db.settings.tables.map(function (t) { return t.name; });
           const t = typeof patch.table === 'string' ? clean_(patch.table) : '';
-          if (names.indexOf(t) < 0) throw appErr_('その卓はありません。「名簿・設定」の卓の設定をご確認ください。');
+          if (!hasTable_(db.settings, t)) throw appErr_('その卓はありません。「名簿・設定」の卓の設定をご確認ください。');
           p.table = t;
         }
         p.rawSeat = null; // 席番号の列に書かれていた内容（卓のつもりで書いた「上座」など）は、卓を選び直したので消します
@@ -240,9 +240,8 @@ function adminUpdatePerson(key, id, patch) { return api_(function () {
           if (tn) p.table = tn;
         }
       }
-      if (patch.clearSeat === true) clearSeat_(p);
       // 受付をやり直すときは、名前を選んだスマホ（間違えて選んだ人のスマホを含む）が使えなくなるよう合言葉も新しくします
-      if (patch.releaseClaim === true) { p.claimedAt = null; p.claimKey = null; p.token = newToken_(db); }
+      if (patch.releaseClaim === true) releaseClaim_(db, p);
       save_(db);
       return adminState_(db);
     });
@@ -299,13 +298,11 @@ function adminSaveSettings(key, s) { return api_(function () {
       if (s.tables !== undefined) {
         if (typeof s.tables !== 'string') throw appErr_('卓の設定を文字で入力してください。');
         const tables = parseTables_(s.tables, true);
-        const total = tables.reduce(function (n, t) { return n + t.seats; }, 0);
-        if (tables.length && total > MAX_SEATS_) throw appErr_('席数の合計が' + total + '席です。合計' + MAX_SEATS_ + '席までにしてください。');
+        const total = tables.reduce(function (n, t) { return n + t.seats; }, 0); // 合計の上限は parseTables_ が確かめます
         if (tables.length && total < maxSeat) throw appErr_(seatHolder_(db, maxSeat) + 'が決まっているため、卓の席数の合計を' + maxSeat + '席より少なくできません（その方の「修正」で席を空きに戻すと減らせます）。');
         // 固定席の方の卓が、新しい卓の一覧に無くなっていたら「未設定」に戻し、今まであった卓なら幹事画面で知らせます（clearedFixed）
-        const names = tables.map(function (t) { return t.name; });
         db.people.forEach(function (p) {
-          if (p.kind !== 'fixed' || p.seat !== null || !p.table || names.indexOf(p.table) >= 0) return; // 席を決めてある方の卓は、席の番号から決まります
+          if (p.kind !== 'fixed' || p.seat !== null || !p.table || hasTable_({ tables: tables }, p.table)) return; // 席を決めてある方の卓は、席の番号から決まります
           if (fixedTable_(st, p)) cleared.push(p.name + 'さん（' + p.table + '）');
           p.table = null; db.dirty = true;
         });
@@ -353,9 +350,9 @@ function adminReissueToken(key, id, opts) { return api_(function () {
     return withLock_(function () {
       const db = load_(true);
       const p = findById_(db, id);
-      p.token = newToken_(db);
-      p.claimedAt = null; p.claimKey = null; // 古いスマホは使えなくなるので、共通QRから選び直せるようにします
-      if (o.clearSeat === true) clearSeat_(p);
+      releaseClaim_(db, p); // 古いスマホは使えなくなるので、共通QRから選び直せるようにします
+      // 席を決めてある固定席の方は、席はそのままで演出だけやり直します（「席だけ消す」と同じ）
+      if (o.clearSeat === true) { if (p.kind === 'fixed' && p.seat !== null) p.drawnAt = null; else clearSeat_(p); }
       if (o.clearDrink === true) { p.drink = null; p.drinkAt = null; }
       save_(db);
       return adminState_(db);
@@ -609,21 +606,21 @@ function spreadsheet_() {
 }
 
 function writeHeaders_(sh) {
-  // 使っていない列（I〜Z など）を消されていたら、A〜J列が収まるように列を足します
-  const mc = sh.getMaxColumns();
-  if (mc < HEADERS_.length) sh.insertColumnsAfter(mc, HEADERS_.length - mc);
   const r = sh.getRange(1, 1, 1, HEADERS_.length);
   r.setNumberFormat('@');
   r.setValues([HEADERS_]);
   sh.setFrozenRows(1);
 }
 
-/* A〜J列の途中に列を差し込む・消すと全員のデータがずれて書き込まれるので止めます（head はK列まで。見出しの書き換えだけなら通します） */
-/* 見出しの行が1行目からずれていないか（1行目を消した・上に行を差し込んだ）。ずれていたら書き込まずに止めます */
 /* 区分の列の固定席の書き方（「固定」「固定席」「固定（A卓）」「固定 A卓」など。かっこの中・後ろが卓の名前） */
 const FIXED_KIND_ = /^(?:固定|fixed)\s*(?:席)?\s*[（(:：、,，]?\s*(.*?)\s*[）)]?$/i;
+function str_(v) { return v === null || v === undefined ? '' : String(v).trim(); }
+/* このアプリが書いた行（A列にID・B列にトークンの形） */
+function isAppRow_(h) { return /^p[A-Za-z0-9]{10}$/.test(h[0]) && /^[A-Za-z0-9]{20}$/.test(h[1]); }
+
+/* 見出しの行が1行目からずれていないか（1行目を消した・上に行を差し込んだ）。ずれていたら書き込まずに止めます */
 function checkHeaderRow_(head, below, current) {
-  const t = function (v) { return v === null || v === undefined ? '' : String(v).trim(); };
+  const t = str_; // セルの文字（前後の空白なし）
   const cells = function (r) { const out = []; for (let c = 0; c < HEADERS_.length; c++) out.push(t(r[c])); return out; };
   // その列の見出しと同じ数／どの列でも見出しの言葉である数
   const pos = function (r) { return cells(r).filter(function (v, c) { return v === HEADERS_[c]; }).length; };
@@ -653,9 +650,9 @@ function checkHeaderRow_(head, below, current) {
     let nI = 0, bI = 0, nJ = 0, bJ = 0;
     below.forEach(function (r) {
       const h = cells(r);
-      if (!/^p[A-Za-z0-9]{10}$/.test(h[0]) || !/^[A-Za-z0-9]{20}$/.test(h[1])) return;
+      if (!isAppRow_(h)) return;
       if (h[8]) { nI++; if (!isDate(r[8])) bI++; }
-      if (h[9]) { nJ++; if (!/^[A-Za-z0-9]{16,64}$/.test(h[9])) bJ++; }
+      if (h[9]) { nJ++; if (!validClaimKey_(h[9])) bJ++; }
     });
     if ((chkI && bI && bI * 2 >= nI) || (chkJ && bJ && bJ * 2 >= nJ)) throw appErr_(ERR_COLUMNS_);
   }
@@ -664,7 +661,7 @@ function checkHeaderRow_(head, below, current) {
     below.forEach(function (r) {
       const h = cells(r);
       // 席・ドリンク・日時がまだ無い行は、列がずれても見分けがつかないので数えません
-      if (!/^p[A-Za-z0-9]{10}$/.test(h[0]) || !/^[A-Za-z0-9]{20}$/.test(h[1]) || !h.slice(4).some(function (v) { return v; })) return;
+      if (!isAppRow_(h) || !h.slice(4).some(function (v) { return v; })) return;
       rows++;
       // 席番号・受付確認キーの列に日時がある・ドリンクの列に席番号の数がある → ずれています（手で書き直せる日時の列は見ません）
       if ([4, 9].some(function (c) { return isDate(r[c]); }) || typeof r[5] === 'number') strong++;
@@ -675,8 +672,9 @@ function checkHeaderRow_(head, below, current) {
   }
 }
 
+/* A〜J列の途中に列を差し込む・消すと全員のデータがずれて書き込まれるので止めます（head はK列まで。見出しの書き換えだけなら通します） */
 function checkColumns_(head) {
-  const h = head.map(function (v) { return v === null || v === undefined ? '' : String(v).trim(); });
+  const h = head.map(str_);
   for (let c = 0; c < h.length && c <= HEADERS_.length; c++) {
     const i = HEADERS_.indexOf(h[c]);
     // 決まった見出しが別の列にあり、その本来の列には無い → 列がずれています
@@ -716,10 +714,10 @@ function lockedSheet_(ss, name, create) {
 
 function ensurePeopleSheet_(ss, create) {
   const sh = lockedSheet_(ss, SHEET_PEOPLE_, create);
-  if (sh.getLastRow() < 1) { writeHeaders_(sh); return sh; }
   // I〜Z列などを消して列が足りないときは、先に列を足します（足りないままでは右の列を読み書きできないため）
   const mc = sh.getMaxColumns();
   if (mc < HEADERS_.length) sh.insertColumnsAfter(mc, HEADERS_.length - mc);
+  if (sh.getLastRow() < 1) { writeHeaders_(sh); return sh; }
   const raw = sh.getRange(1, 1, 1, Math.min(HEADERS_.length + 1, sh.getMaxColumns())).getValues()[0];
   checkHeaderRow_(raw, sh.getLastRow() >= 2 ? sh.getRange(2, 1, sh.getLastRow() - 1, HEADERS_.length).getValues() : [], settingsHas_(ss, 'sheetVersion') !== false);
   checkColumns_(raw);
@@ -912,7 +910,7 @@ function load_(locked) {
       if (kind === 'fixed' && p.seat !== null) {
         // 卓の名前そのもの（「卓2」「T2 番」など、名前が数字で終わる卓）は、席ではなく卓として読みます
         const full = clean_(cellText_(r[4]) || '').replace(/\s*(?:番|席)$/, '');
-        if (settings.tables.some(function (t) { return t.name === full; })) { p.seat = null; p.rawSeat = r[4]; }
+        if (typeof r[4] === 'string' && hasTable_(settings, full)) { p.seat = null; p.rawSeat = r[4]; } // アプリが書いた席番号（数値）は卓の名前と比べません（卓の名前が「1」「2」でも席のまま）
       }
       if (kind === 'fixed' && p.rawSeat !== null) {
         // 固定席の方の席番号の列に、番号の無い卓の名前（「A卓」）が書いてあれば、その卓にします（「A卓 3」「12」は、その席を決めてあることになります）。
@@ -931,7 +929,10 @@ function load_(locked) {
     const taken = Object.create(null);
     seatOrder_(db, function (p) { return p.seat !== null; }).forEach(function (i) {
       const p = db.people[i];
-      if (taken[p.seat]) { p.seat = null; p.rawSeat = named[i].r[4]; p.dupSeat = true; }
+      if (taken[p.seat]) {
+        p.seat = null; p.rawSeat = named[i].r[4]; p.dupSeat = true;
+        if (p.kind === 'fixed') { const km = FIXED_KIND_.exec(cellText_(named[i].r[3]) || ''); p.table = km && km[1] ? clean_(km[1]) : null; } // 席から決めた卓は使いません
+      }
       else taken[p.seat] = true;
     });
     db.ghosts.forEach(function (g) { if (g.seat !== null) { if (taken[g.seat]) { g.seat = null; g.rawSeat = g.raw[COL_SEAT_ - 1]; } else taken[g.seat] = true; } });
@@ -979,7 +980,8 @@ function ghostValues_(g) {
 
 /* 固定席の方の席番号の列に書かれた卓の名前（「A卓」「A卓 3」）。今ある卓で、区分の列の卓と食い違わなければ返します（無ければ ''） */
 function fixedTableOf_(cell, p, settings) {
-  const known = function (n) { return settings.tables.some(function (t) { return t.name === n; }); };
+  if (typeof cell === 'number') return ''; // 数値は席番号です（卓の名前が数字だけでも、卓とは読みません）
+  const known = function (n) { return hasTable_(settings, n); };
   // 名前が数字で終わる卓（「テーブル2」）もあるので、まず全体を卓の名前として探し、無ければ末尾の番号を除いて探します
   const full = clean_(cellText_(cell) || '').replace(/\s*(?:番|席)$/, '');
   const tn = known(full) ? full : full.replace(/[\s:：、,，]*\d+$/, '');
@@ -994,10 +996,8 @@ function seatOrder_(db, pick) {
 
 /* 読み取れなかった・重なっていた席番号（と固定席の方の卓）が使えるようになっていたら席にします（読み込み直したときと同じ状態を返すため）。変わったら true */
 function resolveRaw_(db) {
-  const taken = Object.create(null);
+  const taken = takenSeats_(db);
   let changed = false;
-  db.people.forEach(function (p) { if (p.seat !== null) taken[p.seat] = true; });
-  db.ghosts.forEach(function (g) { if (g.seat !== null) taken[g.seat] = true; });
   seatOrder_(db, function (p) { return p.seat === null && p.rawSeat !== null; }).forEach(function (i) {
     const p = db.people[i], n = seatOf_(p.rawSeat, db.settings);
     if (n !== null && !taken[n]) {
@@ -1011,12 +1011,15 @@ function resolveRaw_(db) {
     if (n !== null && !taken[n]) { g.seat = n; g.rawSeat = null; taken[n] = true; changed = true; }
   });
   db.people.forEach(function (p) {
-    if (p.kind !== 'fixed' || p.rawSeat === null) return;
+    if (p.kind !== 'fixed' || p.rawSeat === null || p.dupSeat) return; // ほかの方と重なった席番号は、卓として読みません（注意を残すため）
     const tn = fixedTableOf_(p.rawSeat, p, db.settings);
     if (tn) { p.table = tn; p.rawSeat = null; changed = true; }
   });
   return changed;
 }
+
+/* 受付を取り消し、トークン（個別QR・覚えていたスマホ）を作り直します */
+function releaseClaim_(db, p) { p.claimedAt = null; p.claimKey = null; p.token = newToken_(db); }
 
 /* 席を空きに戻します（読み取れなかった席番号の文字も消します） */
 function clearSeat_(p) { p.seat = null; p.drawnAt = null; p.rawSeat = null; }
@@ -1105,10 +1108,7 @@ function save_(db) {
     while (e + 1 <= maxRow && byRow[e + 1]) e++;
     const n = e - r + 1, out = [];
     for (let k = r; k <= e; k++) out.push(byRow[k]);
-    const range = sh.getRange(r, 1, n, W);
-    range.setNumberFormat('@'); // 利用者の入力が数式や日付・数値として解釈されないように書式なしテキストにします
-    sh.getRange(r, COL_SEAT_, n, 1).setNumberFormat('0');
-    range.setValues(out);
+    writeRows_(sh, r, out);
     r = e + 1;
   }
   db.loadedRaw = Object.create(null);
@@ -1121,34 +1121,37 @@ function save_(db) {
   SpreadsheetApp.flush();
 }
 
+/* A〜J列に書き込みます。利用者の入力が数式や日付・数値として解釈されないように書式なしテキストにします（席番号の列だけ数値） */
+function writeRows_(sh, row, values) {
+  const range = sh.getRange(row, 1, values.length, HEADERS_.length);
+  range.setNumberFormat('@');
+  sh.getRange(row, COL_SEAT_, values.length, 1).setNumberFormat('0');
+  range.setValues(values);
+}
+
 /* 1人分の行だけを書き込みます（参加者の抽選・ドリンク登録用）。読み込み時に直した箇所があれば全体を書き込みます。 */
 function saveRow_(db, p) {
   if (db.dirty || !p.row) { save_(db); return; }
   // 行がずれていたら書かない（上の verifyRows_ と同じ理由）
   if (p.row > db.sheet.getMaxRows() || rowText_(db.sheet.getRange(p.row, 1, 1, HEADERS_.length).getValues()[0]) !== db.loadedRaw[p.row]) throw appErr_(ERR_BUSY_);
-  const range = db.sheet.getRange(p.row, 1, 1, HEADERS_.length);
-  range.setNumberFormat('@');
-  db.sheet.getRange(p.row, COL_SEAT_).setNumberFormat('0');
-  range.setValues([rowValues_(p)]);
-  db.loadedRaw[p.row] = rowText_(rowValues_(p));
+  const v = rowValues_(p);
+  writeRows_(db.sheet, p.row, [v]);
+  db.loadedRaw[p.row] = rowText_(v);
   SpreadsheetApp.flush();
 }
 
-function newId_(db) {
-  let id;
-  do { id = 'p' + randomString_(10); } while (db.people.some(function (p) { return p.id === id; }) || db.ghosts.some(function (g) { return cellText_(g.raw[0]) === id; }));
-  return id;
+/* 名簿の方・お名前の無い行のどれとも重ならない ID（p＋10文字）・トークン（20文字） */
+function uniqueCode_(db, field, col, make) {
+  let v;
+  do { v = make(); } while (db.people.some(function (p) { return p[field] === v; }) || db.ghosts.some(function (g) { return cellText_(g.raw[col]) === v; }));
+  return v;
 }
-
-function newToken_(db) {
-  let t;
-  do { t = randomString_(20); } while (db.people.some(function (p) { return p.token === t; }) || db.ghosts.some(function (g) { return cellText_(g.raw[1]) === t; }));
-  return t;
-}
+function newId_(db) { return uniqueCode_(db, 'id', 0, function () { return 'p' + randomString_(10); }); }
+function newToken_(db) { return uniqueCode_(db, 'token', 1, function () { return randomString_(20); }); }
 
 /* 「山田さんの席（B卓 4番）」：その席番号の方と、いまの卓での場所（設定を変える前の表示） */
 function seatHolder_(db, seat) {
-  const pl = seatPlace_(db.settings, seat), where = pl.table ? pl.table + ' ' + pl.num + '番' : seat + '番';
+  const where = placeLabel_(db.settings, seat);
   const p = db.people.filter(function (x) { return x.seat === seat; })[0];
   return p ? p.name + 'さんの席（' + where + '）' : 'お名前の無い行の席（' + where + '）';
 }
@@ -1169,11 +1172,14 @@ function findById_(db, id) {
   throw appErr_(ERR_PERSON_);
 }
 
-function freeSeats_(db) {
+/* 使っている席（名簿の方とお名前の無い行） */
+function takenSeats_(db) {
   const taken = Object.create(null);
-  db.people.forEach(function (p) { if (p.seat !== null) taken[p.seat] = true; });
-  db.ghosts.forEach(function (g) { if (g.seat !== null) taken[g.seat] = true; });
-  const free = [];
+  db.people.concat(db.ghosts).forEach(function (x) { if (x.seat !== null) taken[x.seat] = true; });
+  return taken;
+}
+function freeSeats_(db) {
+  const taken = takenSeats_(db), free = [];
   for (let s = 1; s <= db.settings.seats; s++) if (!taken[s]) free.push(s);
   return free;
 }
@@ -1236,12 +1242,14 @@ function seatPlace_(settings, seat) {
   return { table: null, num: seat };
 }
 
+function hasTable_(settings, name) { return settings.tables.some(function (t) { return t.name === name; }); }
+function tablesView_(st) { return st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }); }
 function placeLabel_(settings, seat) { const pl = seatPlace_(settings, seat); return pl.table ? pl.table + ' ' + pl.num + '番' : seat + '番'; }
 
 /* 固定席の方の卓。今の卓の一覧に無い卓（シートで書き換えた・卓の設定が変わった）は「未設定」として扱います */
 function fixedTable_(st, p) {
   if (p.kind === 'fixed' && p.seat !== null) return seatPlace_(st, p.seat).table;
-  return p.kind === 'fixed' && p.table && st.tables.some(function (t) { return t.name === p.table; }) ? p.table : null;
+  return p.kind === 'fixed' && p.table && hasTable_(st, p.table) ? p.table : null;
 }
 
 function fixedLabels_(db) {
@@ -1262,16 +1270,16 @@ function isDevUrl_(u) { return /\/dev\/?$/.test(String(u || '')); }
 function participantView_(db, p) {
   const st = db.settings;
   // 席を決めてある固定席の方には、くじを引く方と同じ画面を見せます（くじの演出のあとに、決めてある席が出ます）
-  const staged = p.kind === 'fixed' && p.seat !== null, seat = staged && !p.drawnAt ? null : p.seat;
+  const staged = p.kind === 'fixed' && p.seat !== null, seat = staged && !p.drawnAt ? null : p.seat, place = seatPlace_(st, seat);
   return {
     event: st.event,
     name: p.name,
     kind: staged ? 'lottery' : p.kind,
     seat: seat,
     // 卓があるときの表示：「A卓 3番」（固定席の方は、幹事が指定した卓）
-    table: p.kind === 'fixed' && !staged ? fixedTable_(st, p) : seatPlace_(st, seat).table,
-    tableSeat: p.kind === 'fixed' && !staged ? null : seatPlace_(st, seat).num,
-    tables: st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }),
+    table: p.kind === 'fixed' && !staged ? fixedTable_(st, p) : place.table,
+    tableSeat: p.kind === 'fixed' && !staged ? null : place.num,
+    tables: tablesView_(st),
     drink: p.drink,
     drinkAt: p.drinkAt || '', // ドリンクを保存するときに送り返します（遅れて届いた古い保存で上書きしないため）
     drinks: st.drinks.slice(),
@@ -1310,7 +1318,7 @@ function summary_(db) {
 function adminState_(db) {
   const st = db.settings, labels = fixedLabels_(db);
   return {
-    settings: { seats: st.seats, tables: st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }), event: st.event, drinks: st.drinks.slice(), drinkOpen: st.drinkOpen, baseUrl: st.baseUrl, appUrl: appUrl_(st),
+    settings: { seats: st.seats, tables: tablesView_(st), event: st.event, drinks: st.drinks.slice(), drinkOpen: st.drinkOpen, baseUrl: st.baseUrl, appUrl: appUrl_(st),
       joinOpen: st.joinOpen, joinUrl: appUrl_(st) && st.joinCode ? appUrl_(st) + '?j=' + st.joinCode : '',
       devUrl: !st.baseUrl && isDevUrl_(rawServiceUrl_()) /* 自動で取れた URL がテスト用（/dev）だった */ },
     people: db.people.map(function (p) {
