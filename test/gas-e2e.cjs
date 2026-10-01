@@ -1584,6 +1584,13 @@ async function step(name, fn) {
       // ドリンクを変えると、送る内容も変わる
       await ph.click('#drinklist button:nth-child(2)');
       await ph.waitForFunction(m => decodeURIComponent(document.getElementById('lineshare').href).includes('1杯目：' + m), menu[1]);
+      // 「もう一回くじを回してみる」の演出中も出したまま（席は変わらないので、下の欄が上下しない）
+      await ph.click('#again');
+      await ph.waitForTimeout(300);
+      assert.equal(await ph.evaluate(() => rolling !== null), true); // eslint-disable-line no-undef
+      assert.equal(await ph.isVisible('#linebox'), true, '演出中も出したまま');
+      await ph.waitForSelector('#again:not([hidden])', { timeout: 10000 });
+      assert.equal(await ph.isVisible('#linebox'), true);
       await ph.locator('#linebox').scrollIntoViewIfNeeded();
       await shot(ph, 'line-share');
       await ph.context().close();

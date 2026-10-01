@@ -195,7 +195,7 @@ function syncSwitch(id){
 /* 「LINEで自分に送る」：席（固定席の方は卓）とドリンクが決まってから出します。押すとLINEが開き、送り先を選んで送ります */
 function syncLine(){
  const v=view,fixed=v&&v.kind==='fixed';
- const ok=!!v&&!rolling&&!drawing&&v.drink!=null&&(shown==='result'&&v.seat!=null||shown==='fixed'&&fixed);
+ const ok=!!v&&!drawing&&v.drink!=null&&(shown==='result'&&v.seat!=null||shown==='fixed'&&fixed);
  $('linebox').hidden=!ok;
  if(!ok)return;
  const place=fixed?(v.table?v.table+'（固定席）':'固定席（当日ご案内します）'):v.table?v.table+' '+v.tableSeat+'番':v.seat+'番';
