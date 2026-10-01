@@ -1524,6 +1524,36 @@ async function step(name, fn) {
       await pg.context().close();
     });
 
+    await step('固定席の席を決めておく：修正で卓と番号を選ぶと、ご本人は「くじを引く」の演出のあとにその席が出る', async () => {
+      callServer(ctx, 'adminAddPeople', [KEY, ['演出 来賓'], 'fixed']);
+      const t0 = state().settings.tables[0];
+      const pg = await newPage(browser, 'staged-admin', { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows tr', { hasText: '演出 来賓' }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#editdialog[open]').waitFor();
+      assert.equal(await pg.isVisible('#editseat'), true);
+      await pg.selectOption('#edittable', t0.name);
+      // 空いている最後の番号を選ぶ（ほかの方に決まっている番号は選べない）
+      const opt = await pg.evaluate(() => [...document.getElementById('editseat').options].filter(o => o.value && !o.disabled).pop().value);
+      await pg.selectOption('#editseat', opt);
+      await pg.click('#editform button[type=submit]');
+      await waitStatus(pg, /演出 来賓さんを修正しました/);
+      const g = byName('演出 来賓');
+      assert.deepEqual([g.kind, g.seat, g.table], ['fixed', Number(opt), t0.name]);
+      assert.match(await text(pg, '#drinkrows'), new RegExp('固定 ' + t0.name + ' ' + g.tableSeat + '番'));
+      await pg.context().close();
+      const ph = await newPage(browser, 'staged-phone', { width: 390, height: 844 });
+      await open(ph, { t: g.token });
+      await ph.waitForSelector('#draw:not([disabled])');
+      assert.equal(await ph.isVisible('#fixedname'), false, '固定席の画面ではなく、くじの画面');
+      await ph.click('#draw');
+      await ph.waitForSelector('#again:not([hidden])', { timeout: 10000 });
+      assert.equal((await text(ph, '#number')).replace('番', '').trim(), String(g.tableSeat));
+      assert.equal((await text(ph, '#tablename')).trim(), t0.name);
+      assert.ok(byName('演出 来賓').drawnAt, '演出を見た時刻');
+      await ph.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });
