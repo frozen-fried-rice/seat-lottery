@@ -2405,6 +2405,20 @@ test('安定版確認: 卓の名前が数字でも決めた席を保つ／席の
     admin('adminUpdatePerson', g.id, { clearSeat: true });
     assert.equal(ctx.__mock.values('参加者')[2][3], '固定');
   }
+  // C2: 「A卓 3」と書いた固定席の方どうしが重なっても、注意と書いた内容を残す
+  {
+    const { ctx, add, admin, byName } = fresh();
+    admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
+    add(['F1', 'F2'], 'fixed');
+    const sh = ctx.__mock.sheet('参加者');
+    sh.getRange(2, 5).setValue('A卓 3'); sh.getRange(3, 5).setValue('A卓 3');
+    for (let i = 0; i < 2; i++) { // 読み直しても同じ
+      const f1 = byName('F1'), f2 = byName('F2');
+      assert.deepEqual([f1.seat, f1.table], [3, 'A卓']);
+      assert.deepEqual([f2.seat, f2.table, f2.badSeat, f2.dupSeat], [null, null, 'A卓 3', true]);
+    }
+    assert.equal(String(ctx.__mock.values('参加者')[2][4]), 'A卓 3', '書いた内容は消さない');
+  }
   // D: 「席とドリンクも消す」でQRを作り直しても、決めた席は残り演出だけやり直せる
   {
     const { add, admin, call, byName } = fresh();

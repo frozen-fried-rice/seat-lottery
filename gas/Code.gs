@@ -1011,7 +1011,7 @@ function resolveRaw_(db) {
     if (n !== null && !taken[n]) { g.seat = n; g.rawSeat = null; taken[n] = true; changed = true; }
   });
   db.people.forEach(function (p) {
-    if (p.kind !== 'fixed' || p.rawSeat === null) return;
+    if (p.kind !== 'fixed' || p.rawSeat === null || p.dupSeat) return; // ほかの方と重なった席番号は、卓として読みません（注意を残すため）
     const tn = fixedTableOf_(p.rawSeat, p, db.settings);
     if (tn) { p.table = tn; p.rawSeat = null; changed = true; }
   });
