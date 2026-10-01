@@ -47,6 +47,8 @@ button:disabled{cursor:default;opacity:.55}
 .confirmname{font-size:26px;font-weight:800;color:#193961;margin:6px 0 4px;overflow-wrap:anywhere}
 .stack{display:grid;gap:10px;margin-top:18px}
 .switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
+.linebtn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:12px 18px;border-radius:14px;background:#06c755;color:#fff;font-weight:700;font-size:17px;text-decoration:none}
+.linebtn:focus-visible{outline:3px solid #183659;outline-offset:2px}
 .linkbtn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;border-radius:14px;background:#e9eff8;color:#183659;font-weight:700;text-decoration:none}
 button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
 #mylinkbox{padding:18px 20px}
@@ -123,6 +125,12 @@ button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus
   <p class="current" id="drinkcurrent"></p>
  </div>
 </section>
+<section class="card" id="linebox" hidden aria-labelledby="lineh">
+ <h2 id="lineh" style="font-size:17px">結果をLINEに残す</h2>
+ <p class="hint" style="margin:0 0 12px">送り先は「Keepメモ」（自分だけのトーク）を選んでください。<br>グループやほかの方には送らないでください（文中のリンクから、あなたのドリンクを変更できてしまいます）。</p>
+ <a class="linebtn" id="lineshare" target="_blank" rel="noopener">LINEで自分に送る</a>
+ <p class="hint" style="margin:10px 0 0">ドリンクを変えたときは、もう一度押すと新しい内容で送れます。</p>
+</section>
 <section class="card" id="mylinkbox" hidden>
  <p class="hint" style="margin:0 0 10px">このスマホでもう一度開くときは、同じQRコードを読み取るか、下の「自分専用のページ」を開いてブックマーク（ホーム画面に追加）しておくと確実です。</p>
  <a class="linkbtn" id="mylink" target="_blank" rel="noopener">自分専用のページを開く</a>
@@ -180,6 +188,18 @@ function syncSwitch(id){
  const link=person&&view&&view.link;
  $('mylinkbox').hidden=!link;
  if(link)$('mylink').href=view.link;
+ syncLine();
+}
+/* 「LINEで自分に送る」：席（固定席の方は卓）とドリンクが決まってから出します。押すとLINEが開き、送り先を選んで送ります */
+function syncLine(){
+ const v=view,fixed=v&&v.kind==='fixed';
+ const ok=!!v&&!rolling&&!drawing&&v.drink!=null&&(shown==='result'&&v.seat!=null||shown==='fixed'&&fixed);
+ $('linebox').hidden=!ok;
+ if(!ok)return;
+ const place=fixed?(v.table?v.table+'（固定席）':'固定席（当日ご案内します）'):v.table?v.table+' '+v.tableSeat+'番':v.seat+'番';
+ const lines=['【'+(v.event?v.event+' ':'')+'席くじ】',v.name+' さん','お席：'+place,'1杯目：'+(v.drink===UNDECIDED?'未定（あとで決める）':v.drink)];
+ if(v.link)lines.push('','自分のページ（ドリンクの変更もここから）：',v.link);
+ $('lineshare').href='https://line.me/R/share?text='+encodeURIComponent(lines.join('\n'));
 }
 function focusEl(el){if(el&&!el.hidden){try{el.focus({preventScroll:true});}catch(e){}}}
 function bad(msg){

@@ -1554,6 +1554,52 @@ async function step(name, fn) {
       await ph.context().close();
     });
 
+    await step('LINEで自分に送る：ドリンクを選んだあとに出て、席・ドリンク・自分のページのリンクを送る（固定席の方も）', async () => {
+      callServer(ctx, 'adminSaveSettings', [KEY, { drinkOpen: true }]);
+      callServer(ctx, 'adminAddPeople', [KEY, ['送信 一郎'], 'lottery']);
+      callServer(ctx, 'adminAddPeople', [KEY, ['送信 来賓'], 'fixed']);
+      const t0 = state().settings.tables[0].name, menu = state().settings.drinks;
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('送信 来賓').id, { table: t0 }]);
+      const shareText = async pg => {
+        const href = await pg.getAttribute('#lineshare', 'href');
+        assert.match(href, /^https:\/\/line\.me\/R\/share\?text=/);
+        return decodeURIComponent(href.split('text=')[1]);
+      };
+      const ph = await newPage(browser, 'line-phone', { width: 390, height: 844 });
+      const me = byName('送信 一郎');
+      await open(ph, { t: me.token });
+      await ph.waitForSelector('#draw:not([disabled])');
+      assert.equal(await ph.isVisible('#linebox'), false, 'くじの前は出さない');
+      await ph.click('#draw');
+      await ph.waitForSelector('#again:not([hidden])', { timeout: 10000 });
+      assert.equal(await ph.isVisible('#linebox'), false, 'ドリンクを選ぶ前は出さない');
+      await ph.click('#drinklist button:first-child');
+      await ph.waitForSelector('#linebox:not([hidden])');
+      const p1 = byName('送信 一郎');
+      let txt = await shareText(ph);
+      assert.ok(txt.includes('送信 一郎 さん'), txt);
+      assert.ok(txt.includes('お席：' + p1.table + ' ' + p1.tableSeat + '番'), txt);
+      assert.ok(txt.includes('1杯目：' + menu[0]), txt);
+      assert.ok(txt.includes('?t=' + p1.token), txt);
+      // ドリンクを変えると、送る内容も変わる
+      await ph.click('#drinklist button:nth-child(2)');
+      await ph.waitForFunction(m => decodeURIComponent(document.getElementById('lineshare').href).includes('1杯目：' + m), menu[1]);
+      await ph.locator('#linebox').scrollIntoViewIfNeeded();
+      await shot(ph, 'line-share');
+      await ph.context().close();
+      // 固定席の方（席の番号なし）：卓と固定席を送る
+      const pf = await newPage(browser, 'line-fixed', { width: 390, height: 844 });
+      await open(pf, { t: byName('送信 来賓').token });
+      await pf.waitForSelector('#fixed:not([hidden])');
+      assert.equal(await pf.isVisible('#linebox'), false);
+      await pf.click('#drinklist button:first-child');
+      await pf.waitForSelector('#linebox:not([hidden])');
+      txt = await shareText(pf);
+      assert.ok(txt.includes('お席：' + t0 + '（固定席）'), txt);
+      assert.ok(txt.includes('?t=' + byName('送信 来賓').token), txt);
+      await pf.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });
