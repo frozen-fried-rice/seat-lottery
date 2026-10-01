@@ -1607,6 +1607,34 @@ async function step(name, fn) {
       await pf.context().close();
     });
 
+    await step('安定版確認) 幹事画面：修正で選んだ席がほかの方に決まったら知らせて保存を止める／席を決めた固定席の方を数え違えない', async () => {
+      callServer(ctx, 'adminAddPeople', [KEY, ['確認 来賓一', '確認 来賓二'], 'fixed']);
+      const t0 = state().settings.tables[0], label = 'rel-admin';
+      const pg = await newPage(browser, label, { width: 1280, height: 900 });
+      await open(pg, { admin: KEY });
+      await pg.locator('#drinkrows tr', { hasText: '確認 来賓一' }).waitFor();
+      faults.push({ label, name: 'adminGetState', mode: 'delay', ms: 1500 }); // 開いたときの読み直しが遅れる（その間に、ほかの画面で同じ席が決まる）
+      await pg.locator('#drinkrows tr', { hasText: '確認 来賓一' }).getByRole('button', { name: /修正/ }).click();
+      await pg.locator('#editdialog[open]').waitFor();
+      await pg.selectOption('#edittable', t0.name);
+      const opt = await pg.evaluate(() => [...document.getElementById('editseat').options].filter(o => o.value && !o.disabled).pop().value);
+      await pg.selectOption('#editseat', opt);
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('確認 来賓二').id, { table: t0.name, seat: Number(opt) }]); // その間にほかの画面で同じ席を決めた
+      await pg.waitForFunction(() => !document.getElementById('editerror').hidden, null, { timeout: 8000 });
+      assert.match(await text(pg, '#editerror'), /確認 来賓二さんに決まりました/);
+      await pg.click('#editform button[type=submit]');
+      await pg.waitForTimeout(400);
+      assert.equal(await pg.isVisible('#editdialog'), true, '選び直すまで保存しない');
+      assert.equal(byName('確認 来賓一').seat, null);
+      await pg.click('#editcancel');
+      // 「席が決まった方」はくじを引く方だけを数える
+      await pg.click('#tab-qr');
+      const sm = state().summary, seatedLottery = state().people.filter(p => p.kind === 'lottery' && p.seat != null).length;
+      assert.match(await text(pg, '#view-qr'), new RegExp('席が決まった方 ' + seatedLottery + ' / ' + sm.lottery + '人'));
+      callServer(ctx, 'adminUpdatePerson', [KEY, byName('確認 来賓二').id, { seat: null }]);
+      await pg.context().close();
+    });
+
     await step('ページのエラー・コンソールエラーなし', async () => {
       assert.deepEqual(problems, []);
     });

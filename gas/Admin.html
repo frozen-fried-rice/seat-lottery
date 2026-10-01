@@ -698,9 +698,9 @@ function render(){
  $('eventhead').textContent=st.event||'';$('eventhead').hidden=!st.event;
  const ph='例：山田／'+(hasTables()?(st.tables[0].name+' 3'):'12'); // 卓があるときは、画面に出ている「A卓 3」の形で探せます
  for(const id of ['drinksearch','qrsearch'])if($(id).placeholder!==ph)$(id).placeholder=ph;
- const over=sm.lottery-st.seats;
+ const held=S.people.filter(staged).length,free=st.seats-held,over=sm.lottery-free; // 固定席の方に決めた席は、くじには出ません
  const warns=[];
- if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。'+(hasTables()?'「名簿・設定」の卓の設定で席数を増やすか、固定席に変えてください。':'「名簿・設定」で席数を増やすか、固定席に変えてください。'));
+ if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+free+'席です'+(held?'（固定席の方に決めた'+held+'席を除く）':'')+'。'+over+'人分の席が足りません。'+(hasTables()?'「名簿・設定」の卓の設定で席数を増やすか、固定席に変えてください。':'「名簿・設定」で席数を増やすか、固定席に変えてください。'));
  const who=list=>list.slice(0,5).map(p=>p.name+'さん（「'+p.badSeat+'」）').join('、')+(list.length>5?' ほか'+(list.length-5)+'人':'');
  const bad=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&!p.dupSeat),dup=S.people.filter(p=>p.badSeat&&p.dupSeat),fxb=S.people.filter(p=>p.badSeat&&p.kind==='fixed'&&!p.dupSeat);
  if(bad.length)warns.push('「参加者」シートの席番号を読み取れない方がいます：'+who(bad)+'。直すまでは未抽選として扱います。シートで「'+(hasTables()?'A卓 3':'12')+'」のように直すか、その方の「修正」で消してください。'+(hasTables()?'（卓に無い番号・席数より大きい番号も読み取れません）':'（抽選する席の数より大きい番号も読み取れません）'));
@@ -815,7 +815,7 @@ function renderQr(){
  $('qrurlwarn').textContent=st.devUrl?DEV_URL_MSG:NO_URL_MSG;
  const pending=pendingCount();
  const stats=$('qrstats');stats.replaceChildren(
-  el('span',{class:'tag ok',text:'席が決まった方 '+sm.seated+' / '+sm.lottery+'人'}),
+  el('span',{class:'tag ok',text:'席が決まった方 '+S.people.filter(p=>p.kind==='lottery'&&p.seat!=null).length+' / '+sm.lottery+'人'}),
   el('span',{class:'tag'+(pending?' wait':''),text:'未抽選 '+pending+'人'}),
   el('span',{class:'tag',text:'空いている席 '+sm.seatsLeft+'席'}),
   el('span',{class:'tag',text:'固定席 '+sm.fixed+'人'}));
@@ -899,7 +899,7 @@ $('bulkadd').onclick=()=>{
 async function reset(scope,title,msg,done){
  if(await ask(title,msg,'消す',true))act('adminReset',[scope],()=>ok(done));
 }
-$('resetseats').onclick=()=>reset('seats','席だけ消す','全員の席と抽選日時を消して、未抽選に戻します。名簿・ドリンク・受付済みの記録はそのままです（受付をやり直すときは、各自の「修正」から）。元に戻せません。','席を消しました。');
+$('resetseats').onclick=()=>reset('seats','席だけ消す','全員の席と抽選日時を消して、未抽選に戻します（席を決めておいた固定席の方は、席はそのままで演出だけやり直せます）。名簿・ドリンク・受付済みの記録はそのままです（受付をやり直すときは、各自の「修正」から）。元に戻せません。','席を消しました。');
 $('resetdrinks').onclick=()=>reset('drinks','ドリンクだけ消す','全員のドリンクと登録日時を消します。名簿と席はそのままです。元に戻せません。','ドリンクを消しました。');
 $('resetall').onclick=()=>reset('all','名簿ごと消す','名簿・席・ドリンクをすべて消します（設定は残ります。ドリンクの受付・共通QRでの受付は「受付中」に戻ります）。配ったQRコード（個別QR・共通QR）も使えなくなり、共通QRは新しくなります。元に戻せません。','名簿ごと消しました。');
 
@@ -925,6 +925,7 @@ function openEdit(id){
  const p=person(id);if(!p)return;
  editing={id,name:p.name,kind:p.kind,drink:p.drink||null,fk:lastFk};
  for(const f of EDIT_FIELDS)delete $(f).dataset.touched;
+ delete $('editseat').dataset.lost;
  fillEdit(p);
  $('editclearseat').checked=false;$('editrelease').checked=false;
  $('editerror').hidden=true;
@@ -976,20 +977,27 @@ function fillSeats(){
  const want=ss.dataset.touched?ss.value:editing.seat;
  const sig=JSON.stringify(opts.map(o=>[o.value,o.text,o.disabled]));
  if(ss.dataset.sig!==sig){ss.replaceChildren(...opts);ss.dataset.sig=sig;}
- if(keep(want))ss.value=want;else{ss.value='';if(ss.dataset.touched&&want)delete ss.dataset.touched;}
+ const lost=[...ss.options].find(o=>o.value===want&&o.disabled);
+ if(keep(want))ss.value=want;
+ else{
+  ss.value='';
+  if(ss.dataset.touched&&want)delete ss.dataset.touched;
+  // 選んでいた席が、開いている間にほかの方に決まったら知らせ、選び直すまで保存しません（黙って「番号なし」で保存しないように）
+  if(lost){ss.dataset.lost='1';$('editerror').textContent='選んでいた席（'+(tb?tname+' ':'')+(Number(want)-start)+'番）は、'+taken.get(Number(want))+'さんに決まりました。席を選び直してください。';$('editerror').hidden=false;}
+ }
 }
 function kindHint(){
  const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
  $('edittablewrap').hidden=!(toFixed&&hasTables());
  $('editseatwrap').hidden=!toFixed;
- $('editkindhint').textContent=p&&toFixed&&p.kind==='lottery'&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります（下で席の番号を選び直せます）。':toFixed?'席の番号を決めると、くじの演出のあとにその席が出ます。番号なしなら、くじは引かずドリンクだけ登録します。':'くじを引いて席を決める方です。';
+ $('editkindhint').textContent=p&&!toFixed&&p.kind==='fixed'&&p.seat!=null?'くじを引く方に変えると、決めておいた席（'+placeText(p)+'）は空きに戻ります。':p&&toFixed&&p.kind==='lottery'&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります（下で席の番号を選び直せます）。':toFixed?'席の番号を決めると、くじの演出のあとにその席が出ます。番号なしなら、くじは引かずドリンクだけ登録します。':'くじを引いて席を決める方です。';
  $('clearseatwrap').hidden=!(p&&(p.kind==='lottery'&&(p.seat!=null||p.badSeat)&&!toFixed||p.kind==='fixed'&&p.badSeat&&toFixed));
  $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+placeText(p)+'）を空きに戻す':p&&p.badSeat?(p.kind==='fixed'?'席番号の列に書かれた内容':p.dupSeat?'ほかの方と重なっている席番号':'読み取れない席番号')+'（「'+p.badSeat+'」）を消す':'席を空きに戻す';
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
 $('edittable').onchange=()=>{$('edittable').dataset.touched='1';fillSeats();};
-$('editseat').onchange=()=>{$('editseat').dataset.touched='1';};
+$('editseat').onchange=()=>{$('editseat').dataset.touched='1';delete $('editseat').dataset.lost;};
 $('editcancel').onclick=()=>$('editdialog').close();
 $('editform').onsubmit=e=>{
  e.preventDefault();
@@ -1005,6 +1013,7 @@ $('editform').onsubmit=e=>{
  if($('editclearseat').checked&&!$('clearseatwrap').hidden)patch.clearSeat=true;
  if($('editrelease').checked&&!$('releasewrap').hidden)patch.releaseClaim=true;
  if(!$('edittablewrap').hidden){const tv=$('edittable').value;if(tv!==editing.table||patch.kind==='fixed')patch.table=tv||null;}
+ if(!$('editseatwrap').hidden&&$('editseat').dataset.lost){$('editerror').textContent='選んでいた席は、ほかの方に決まりました。席を選び直してください。';$('editerror').hidden=false;$('editseat').focus();return;}
  if(!$('editseatwrap').hidden){const sv=$('editseat').value;if(sv!==editing.seat||patch.kind==='fixed'||patch.table!==undefined)patch.seat=sv?Number(sv):null;}
  if(!Object.keys(patch).length){$('editdialog').close();return;}
  const id=editing.id;
