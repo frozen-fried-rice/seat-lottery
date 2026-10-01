@@ -76,7 +76,7 @@ button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus
   <div class="number" id="number"></div>
   <p class="sr" id="announce" role="status"></p>
   <p class="hint" id="resulthint" hidden>卓と席の番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
-  <button class="again" id="again" hidden>もう一度演出を見る</button>
+  <button class="again" id="again" hidden>🎲 もう一回くじを回してみる（席は変わりません）</button>
  </div>
  <div id="join" hidden>
   <p class="event" data-ev></p>
@@ -231,7 +231,7 @@ function stopRoll(){
  $('tablename').style.minHeight='';
  if(rolling){clearInterval(rolling);rolling=null;}
  if(replayTimer){clearTimeout(replayTimer);replayTimer=null;}
- replaySeq++; // 演出を止めたら、その「もう一度演出を見る」の読み直しの結果は使いません
+ replaySeq++; // 演出を止めたら、その「🎲 もう一回くじを回してみる」の読み直しの結果は使いません
 }
 function startRoll(top){
  stopRoll();$('announce').textContent='抽選しています';
