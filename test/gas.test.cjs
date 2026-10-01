@@ -2368,5 +2368,57 @@ test('固定席の席：シートに「A卓 3」「3」と書いても決めて�
   assert.deepEqual(got, [1, 2, 4, 5, 7, 8]);
 });
 
+test('安定版確認: 卓の名前が数字でも決めた席を保つ／席の指定と「消す」を同時にしても席が残る／重なった席から卓を決めない／QRの作り直しで決めた席を消さない', () => {
+  // A: 卓の名前が「1」「2」「3」
+  {
+    const { add, admin, call, byName } = fresh();
+    admin('adminSaveSettings', { tables: '1 4\n2 4\n3 4' });
+    add(['来賓'], 'fixed');
+    admin('adminUpdatePerson', byName('来賓').id, { table: '1', seat: 2 });
+    const g = byName('来賓'); // 読み直しても席のまま
+    assert.deepEqual([g.seat, g.table, g.tableSeat], [2, '1', 2]);
+    assert.equal(call('participantDraw', g.token).seat, 2);
+    add(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k']);
+    const seats = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'].map(n => call('participantDraw', byName(n).token).seat);
+    assert.ok(!seats.includes(2), JSON.stringify(seats));
+  }
+  // B: 席番号の列の内容を消すのと、席の指定を同時に
+  {
+    const { ctx, add, admin, byName } = fresh();
+    admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
+    add(['来賓'], 'fixed');
+    ctx.__mock.sheet('参加者').getRange(2, 5).setValue('上座');
+    assert.equal(byName('来賓').badSeat, '上座');
+    admin('adminUpdatePerson', byName('来賓').id, { table: 'B卓', seat: 5, clearSeat: true });
+    const g = byName('来賓');
+    assert.deepEqual([g.seat, g.table, g.badSeat], [5, 'B卓', null]);
+  }
+  // C: 手で書いた席番号がほかの方と重なった固定席の方は、その席の卓にしない
+  {
+    const { ctx, add, admin, call, byName } = fresh();
+    admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
+    add(['L']); add(['来賓'], 'fixed');
+    const s = call('participantDraw', byName('L').token).seat;
+    ctx.__mock.sheet('参加者').getRange(3, 5).setValue(s);
+    const g = byName('来賓');
+    assert.deepEqual([g.seat, g.table, g.dupSeat], [null, null, true]);
+    admin('adminUpdatePerson', g.id, { clearSeat: true });
+    assert.equal(ctx.__mock.values('参加者')[2][3], '固定');
+  }
+  // D: 「席とドリンクも消す」でQRを作り直しても、決めた席は残り演出だけやり直せる
+  {
+    const { add, admin, call, byName } = fresh();
+    admin('adminSaveSettings', { tables: 'A卓 4' });
+    add(['来賓'], 'fixed');
+    admin('adminUpdatePerson', byName('来賓').id, { table: 'A卓', seat: 3 });
+    call('participantDraw', byName('来賓').token);
+    admin('adminReissueToken', byName('来賓').id, { clearSeat: true, clearDrink: true });
+    const g = byName('来賓');
+    assert.deepEqual([g.seat, g.drawnAt], [3, null]);
+    assert.equal(call('participantGet', g.token).seat, null, '演出前');
+    assert.equal(call('participantDraw', g.token).seat, 3);
+  }
+});
+
 console.log(`gas.test: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

@@ -211,6 +211,7 @@ function adminUpdatePerson(key, id, patch) { return api_(function () {
         if (d === null) { p.drink = null; p.drinkAt = null; }
         else { p.drink = d; p.drinkAt = now_(); }
       }
+      if (patch.clearSeat === true) clearSeat_(p); // 席の指定（下）より先に消します（同じ保存で選んだ席を消さないように）
       if (patch.table !== undefined) {
         // 固定席の方の卓（null で未設定）
         if (p.kind !== 'fixed') throw appErr_('卓を指定できるのは固定席の方だけです（くじを引く方の卓は、くじで決まります）。');
@@ -239,7 +240,6 @@ function adminUpdatePerson(key, id, patch) { return api_(function () {
           if (tn) p.table = tn;
         }
       }
-      if (patch.clearSeat === true) clearSeat_(p);
       // 受付をやり直すときは、名前を選んだスマホ（間違えて選んだ人のスマホを含む）が使えなくなるよう合言葉も新しくします
       if (patch.releaseClaim === true) releaseClaim_(db, p);
       save_(db);
@@ -351,7 +351,8 @@ function adminReissueToken(key, id, opts) { return api_(function () {
       const db = load_(true);
       const p = findById_(db, id);
       releaseClaim_(db, p); // 古いスマホは使えなくなるので、共通QRから選び直せるようにします
-      if (o.clearSeat === true) clearSeat_(p);
+      // 席を決めてある固定席の方は、席はそのままで演出だけやり直します（「席だけ消す」と同じ）
+      if (o.clearSeat === true) { if (p.kind === 'fixed' && p.seat !== null) p.drawnAt = null; else clearSeat_(p); }
       if (o.clearDrink === true) { p.drink = null; p.drinkAt = null; }
       save_(db);
       return adminState_(db);
@@ -909,7 +910,7 @@ function load_(locked) {
       if (kind === 'fixed' && p.seat !== null) {
         // 卓の名前そのもの（「卓2」「T2 番」など、名前が数字で終わる卓）は、席ではなく卓として読みます
         const full = clean_(cellText_(r[4]) || '').replace(/\s*(?:番|席)$/, '');
-        if (hasTable_(settings, full)) { p.seat = null; p.rawSeat = r[4]; }
+        if (typeof r[4] === 'string' && hasTable_(settings, full)) { p.seat = null; p.rawSeat = r[4]; } // アプリが書いた席番号（数値）は卓の名前と比べません（卓の名前が「1」「2」でも席のまま）
       }
       if (kind === 'fixed' && p.rawSeat !== null) {
         // 固定席の方の席番号の列に、番号の無い卓の名前（「A卓」）が書いてあれば、その卓にします（「A卓 3」「12」は、その席を決めてあることになります）。
@@ -928,7 +929,10 @@ function load_(locked) {
     const taken = Object.create(null);
     seatOrder_(db, function (p) { return p.seat !== null; }).forEach(function (i) {
       const p = db.people[i];
-      if (taken[p.seat]) { p.seat = null; p.rawSeat = named[i].r[4]; p.dupSeat = true; }
+      if (taken[p.seat]) {
+        p.seat = null; p.rawSeat = named[i].r[4]; p.dupSeat = true;
+        if (p.kind === 'fixed') { const km = FIXED_KIND_.exec(cellText_(named[i].r[3]) || ''); p.table = km && km[1] ? clean_(km[1]) : null; } // 席から決めた卓は使いません
+      }
       else taken[p.seat] = true;
     });
     db.ghosts.forEach(function (g) { if (g.seat !== null) { if (taken[g.seat]) { g.seat = null; g.rawSeat = g.raw[COL_SEAT_ - 1]; } else taken[g.seat] = true; } });
@@ -976,6 +980,7 @@ function ghostValues_(g) {
 
 /* 固定席の方の席番号の列に書かれた卓の名前（「A卓」「A卓 3」）。今ある卓で、区分の列の卓と食い違わなければ返します（無ければ ''） */
 function fixedTableOf_(cell, p, settings) {
+  if (typeof cell === 'number') return ''; // 数値は席番号です（卓の名前が数字だけでも、卓とは読みません）
   const known = function (n) { return hasTable_(settings, n); };
   // 名前が数字で終わる卓（「テーブル2」）もあるので、まず全体を卓の名前として探し、無ければ末尾の番号を除いて探します
   const full = clean_(cellText_(cell) || '').replace(/\s*(?:番|席)$/, '');
