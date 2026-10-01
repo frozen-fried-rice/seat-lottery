@@ -80,15 +80,15 @@ button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus
   <div class="number" id="number"></div>
   <p class="sr" id="announce" role="status"></p>
   <p class="hint" id="resulthint" hidden>卓と席の番号札をご確認ください。<br>スクリーンショットを撮っておくと安心です。</p>
-  <button class="again" id="again" hidden>🎲 もう一回くじを回してみる（席は変わりません）</button>
+  <button class="again" id="again" hidden>🎲 （席は変わりません）</button>
  </div>
  <div id="join" hidden>
   <p class="event" data-ev></p>
   <h1 style="font-size:24px" id="joinh" tabindex="-1">お名前を選んでください</h1>
-  <p class="lead" style="margin-bottom:16px">ご自身のお名前をタップしてください。</p>
+  <p class="lead" style="margin-bottom:16px">あなたの名前をタップしてください。</p>
   <p class="err" id="joinerr" role="alert" tabindex="-1" hidden></p>
   <label class="sr" for="joinsearch">お名前で絞り込み</label>
-  <input class="search" id="joinsearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="お名前の一部で絞り込み（例：山田）">
+  <input class="search" id="joinsearch" type="search" autocomplete="off" enterkeyhint="search" placeholder="お名前から絞り込む">
   <div class="names" id="joinlist"></div>
   <p class="hint" style="margin:16px 0 0">お名前が見つからないときは、受付にお声がけください。</p>
  </div>
@@ -96,10 +96,10 @@ button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus
   <p class="event" data-ev></p>
   <p class="lead" style="margin:0">このお名前で受付します。</p>
   <p class="confirmname" id="confirmname" tabindex="-1"></p>
-  <p class="hint">一度選ぶと、ほかのスマホからはこのお名前を選べなくなります。</p>
+  <p class="hint">⚠️一度選ぶと、ほかのスマホからはこのお名前を選べなくなります。</p>
   <p class="err" id="confirmerr" role="alert" hidden></p>
   <div class="stack">
-   <button class="primary" id="confirmyes">はい、自分です</button>
+   <button class="primary" id="confirmyes">はい、自分です👍</button>
    <button id="confirmno">戻る</button>
   </div>
  </div>
@@ -128,14 +128,14 @@ button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus
  </div>
 </section>
 <section class="card" id="linebox" hidden aria-labelledby="lineh">
- <h2 id="lineh" style="font-size:17px">結果をLINEに残す</h2>
- <p class="hint" style="margin:0 0 12px">送り先は「Keepメモ」（自分だけのトーク）を選んでください。<br>グループやほかの方には送らないでください（文中のリンクから、あなたのドリンクを変更できてしまいます）。</p>
+ <h2 id="lineh" style="font-size:17px">結果をLINEに送る</h2>
+ <p class="hint" style="margin:0 0 12px">送り先は「Keepメモ」（自分だけのトーク）を選んでください。</p>
  <a class="linebtn" id="lineshare" target="_blank" rel="noopener">LINEで自分に送る</a>
  <p class="hint" style="margin:10px 0 0">ドリンクを変えたときは、もう一度押すと新しい内容で送れます。</p>
 </section>
 <section class="card" id="mylinkbox" hidden>
- <p class="hint" style="margin:0 0 10px">このスマホでもう一度開くときは、同じQRコードを読み取るか、下の「自分専用のページ」を開いてブックマーク（ホーム画面に追加）しておくと確実です。</p>
- <a class="linkbtn" id="mylink" target="_blank" rel="noopener">自分専用のページを開く</a>
+ <p class="hint" style="margin:0 0 10px">このスマホでもう一度開くときは、同じQRコードを読み取る or LINEに送る or ⬇️の「マイページ」を開いてブックマークしておくと確実です。</p>
+ <a class="linkbtn" id="mylink" target="_blank" rel="noopener">マイページを開く</a>
 </section>
 <button class="switch" id="switchperson" hidden>ほかの方の受付をする（このスマホで続けて選ぶ）</button>
 <script>
@@ -150,7 +150,7 @@ let gen=0; // 表示する人が変わるたびに増やし、前の人あての
 let renders=0; // render のたびに増やします（演出の見直し中に保存などで描き直していたら、見直しで読んだ古い状態を使わないため）
 let savedFocus=''; // 保存中はボタンを押せなくするのでフォーカスが外れます。保存後に同じボタンへ戻すために覚えておきます
 
-const NET_ERR='通信に失敗しました。電波の良い場所で、もう一度お試しください。';
+const NET_ERR='通信に失敗しました。📶電波の良い場所で、もう一度お試しください。';
 const TIMEOUT_MS=window.__SEKI_TIMEOUT_MS||20000; // 返事が来ないまま待たせない（テストでは短くできます）
 // サーバーのエラーは日本語。日本語を含まないもの（NetworkError・Googleの一時的なエラーなど）は通信のエラーとして扱います
 function errText(e){
@@ -256,7 +256,7 @@ function stopRoll(){
  $('tablename').style.minHeight='';
  if(rolling){clearInterval(rolling);rolling=null;}
  if(replayTimer){clearTimeout(replayTimer);replayTimer=null;}
- replaySeq++; // 演出を止めたら、その「🎲 もう一回くじを回してみる」の読み直しの結果は使いません
+ replaySeq++; // 演出を止めたら、その「🎲 」の読み直しの結果は使いません
 }
 function startRoll(top){
  stopRoll();$('announce').textContent='抽選しています';
