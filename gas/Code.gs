@@ -80,8 +80,8 @@ function participantGet(token) { return api_(function () {
 /* 参加者の書き込みは、まずロックの外でトークンを確かめ（でたらめなトークンでロックを占有させない）、ロックの中でやり直して1行だけ書きます */
 function participantDraw(token) { return api_(function () {
     const pre = load_(), pp = findByToken_(pre, token);
-    if (pp.kind === 'fixed') throw appErr_(ERR_FIXED_);
-    if (pp.seat !== null && pp.claimedAt) return participantView_(pre, pp); // すでに席がある（2回押し・再読込）ならロック不要
+    if (pp.kind === 'fixed' && pp.seat === null) throw appErr_(ERR_FIXED_);
+    if (pp.seat !== null && pp.claimedAt && (pp.kind !== 'fixed' || pp.drawnAt)) return participantView_(pre, pp); // すでに席がある（2回押し・再読込）ならロック不要
     return withLock_(function () {
       const db = load_(true);
       const p = findByToken_(db, token);
@@ -222,6 +222,23 @@ function adminUpdatePerson(key, id, patch) { return api_(function () {
           p.table = t;
         }
         p.rawSeat = null; // 席番号の列に書かれていた内容（卓のつもりで書いた「上座」など）は、卓を選び直したので消します
+        // 決めてあった席が別の卓なら、席は外します（卓だけ選び直した）
+        if (p.seat !== null && patch.seat === undefined && seatPlace_(db.settings, p.seat).table !== p.table) { p.seat = null; p.drawnAt = null; }
+      }
+      if (patch.seat !== undefined) {
+        // 固定席の方の席（通し番号。null で番号なし）。くじの演出では、この席が出ます
+        if (p.kind !== 'fixed') throw appErr_('席を指定できるのは固定席の方だけです（くじを引く方の席は、くじで決まります）。');
+        if (patch.seat === null || patch.seat === '') { if (p.seat !== null) { p.seat = null; p.drawnAt = null; } }
+        else {
+          const n = Number(patch.seat);
+          if (!Number.isInteger(n) || n < 1 || n > db.settings.seats) throw appErr_('その席はありません。席の番号を選び直してください。');
+          const holder = db.people.filter(function (q) { return q !== p && q.seat === n; })[0];
+          if (holder || db.ghosts.some(function (g) { return g.seat === n; })) throw appErr_('その席（' + placeLabel_(db.settings, n) + '）は、' + (holder ? holder.name + 'さん' : 'シートのほかの行') + 'に決まっています。別の席を選んでください。');
+          if (p.seat !== n) { p.seat = n; p.drawnAt = null; }
+          p.rawSeat = null; p.dupSeat = false;
+          const tn = seatPlace_(db.settings, n).table;
+          if (tn) p.table = tn;
+        }
       }
       if (patch.clearSeat === true) clearSeat_(p);
       // 受付をやり直すときは、名前を選んだスマホ（間違えて選んだ人のスマホを含む）が使えなくなるよう合言葉も新しくします
@@ -288,7 +305,7 @@ function adminSaveSettings(key, s) { return api_(function () {
         // 固定席の方の卓が、新しい卓の一覧に無くなっていたら「未設定」に戻し、今まであった卓なら幹事画面で知らせます（clearedFixed）
         const names = tables.map(function (t) { return t.name; });
         db.people.forEach(function (p) {
-          if (p.kind !== 'fixed' || !p.table || names.indexOf(p.table) >= 0) return;
+          if (p.kind !== 'fixed' || p.seat !== null || !p.table || names.indexOf(p.table) >= 0) return; // 席を決めてある方の卓は、席の番号から決まります
           if (fixedTable_(st, p)) cleared.push(p.name + 'さん（' + p.table + '）');
           p.table = null; db.dirty = true;
         });
@@ -372,7 +389,8 @@ function adminReset(key, scope) { return api_(function () {
       }
       if (scope === 'seats') db.ghosts.forEach(function (g) { g.seat = null; g.rawSeat = null; });
       db.people.forEach(function (p) {
-        if (scope === 'seats') clearSeat_(p);
+        // 席を決めてある固定席の方は、席はそのままで、くじの演出をやり直せるようにします
+        if (scope === 'seats') { if (p.kind === 'fixed' && p.seat !== null) p.drawnAt = null; else clearSeat_(p); }
         if (scope === 'drinks') { p.drink = null; p.drinkAt = null; }
       });
       save_(db);
@@ -887,17 +905,23 @@ function load_(locked) {
       const rawSeat = seatOf_(r[4], settings), hasSeat = cellText_(r[4]) !== null;
       // ドリンクは集計と同じ形（全角英数・半角カナ・空白をそろえた形）で扱います（手で「ﾋﾞｰﾙ」と書いても「ビール」と数えるため）
       const dr = cellText_(r[5]);
-      const p = { id: id, token: token, name: x.name, kind: kind, seat: kind === 'lottery' ? rawSeat : null, drink: dr ? clean_(dr) || null : null, drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]),
+      const p = { id: id, token: token, name: x.name, kind: kind, seat: rawSeat, drink: dr ? clean_(dr) || null : null, drawnAt: cellText_(r[6]), drinkAt: cellText_(r[7]),
         claimedAt: cellText_(r[8]), claimKey: cellText_(r[9]), row: x.row, table: km && km[1] ? clean_(km[1]) : null,
         // 読み取れない席番号（「3卓の2」・席数より大きい番号など）は消さずにそのまま残し、幹事画面で知らせます（直すまでは未抽選として扱います）
-        rawSeat: kind === 'lottery' && rawSeat === null && hasSeat ? r[4] : null };
-      if (kind === 'fixed' && hasSeat) {
-        // 固定席の方の席番号の列に今ある卓の名前（「A卓」「A卓 3」）が書いてあれば、その卓にします（番号は使いません）。
+        rawSeat: rawSeat === null && hasSeat ? r[4] : null };
+      if (kind === 'fixed' && p.seat !== null) {
+        // 卓の名前そのもの（「卓2」「T2 番」など、名前が数字で終わる卓）は、席ではなく卓として読みます
+        const full = clean_(cellText_(r[4]) || '').replace(/\s*(?:番|席)$/, '');
+        if (settings.tables.some(function (t) { return t.name === full; })) { p.seat = null; p.rawSeat = r[4]; }
+      }
+      if (kind === 'fixed' && p.rawSeat !== null) {
+        // 固定席の方の席番号の列に、番号の無い卓の名前（「A卓」）が書いてあれば、その卓にします（「A卓 3」「12」は、その席を決めてあることになります）。
         // それ以外（「上座」など）は消さずにそのまま残し、幹事画面で知らせます
         const tn = fixedTableOf_(r[4], p, settings);
-        if (tn) { p.table = tn; db.dirty = true; }
-        else p.rawSeat = r[4];
+        if (tn) { p.table = tn; p.rawSeat = null; db.dirty = true; }
       }
+      // 席を決めてある固定席の方の卓は、席の番号から決まります
+      if (kind === 'fixed' && p.seat !== null) p.table = seatPlace_(settings, p.seat).table;
       if (!p.id || ids[p.id]) { p.id = null; db.dirty = true; }
       if (!p.token || !/^[A-Za-z0-9]{8,64}$/.test(p.token) || tokenCount[p.token] > 1) { p.token = null; p.claimedAt = null; p.claimKey = null; db.dirty = true; }
       if (p.id) ids[p.id] = true;
@@ -944,7 +968,7 @@ function seatOf_(v, settings) {
 function rowValues_(p) {
   // 読み取れない・ほかの方と重なった席番号、固定席の方の席番号の列に書かれた内容（「上座」など）は、そのまま書き戻します
   const seat = p.seat !== null ? p.seat : p.rawSeat !== null ? safeText_(p.rawSeat) : '';
-  return [p.id, p.token, safeText_(p.name), p.kind === 'fixed' ? safeText_(p.table ? '固定（' + p.table + '）' : '固定') : '抽選', seat, safeText_(p.drink || ''), p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
+  return [p.id, p.token, safeText_(p.name), p.kind === 'fixed' ? safeText_(p.table && p.seat === null ? '固定（' + p.table + '）' : '固定') : '抽選', seat, safeText_(p.drink || ''), p.drawnAt || '', p.drinkAt || '', p.claimedAt || '', p.claimKey || ''];
 }
 
 function ghostValues_(g) {
@@ -974,9 +998,12 @@ function resolveRaw_(db) {
   let changed = false;
   db.people.forEach(function (p) { if (p.seat !== null) taken[p.seat] = true; });
   db.ghosts.forEach(function (g) { if (g.seat !== null) taken[g.seat] = true; });
-  seatOrder_(db, function (p) { return p.kind === 'lottery' && p.seat === null && p.rawSeat !== null; }).forEach(function (i) {
+  seatOrder_(db, function (p) { return p.seat === null && p.rawSeat !== null; }).forEach(function (i) {
     const p = db.people[i], n = seatOf_(p.rawSeat, db.settings);
-    if (n !== null && !taken[n]) { p.seat = n; p.rawSeat = null; p.dupSeat = false; taken[n] = true; changed = true; }
+    if (n !== null && !taken[n]) {
+      p.seat = n; p.rawSeat = null; p.dupSeat = false; taken[n] = true; changed = true;
+      if (p.kind === 'fixed') p.table = seatPlace_(db.settings, n).table;
+    }
   });
   db.ghosts.forEach(function (g) {
     if (g.seat !== null || g.rawSeat === null) return;
@@ -1153,7 +1180,13 @@ function freeSeats_(db) {
 
 /* 1人分の抽選。席を割り当てたら true、すでに席があれば false（冪等）。 */
 function drawFor_(db, p) {
-  if (p.kind === 'fixed') throw appErr_(ERR_FIXED_);
+  // 席を決めてある固定席の方は、くじの演出だけ（その席を「引いた」ことにします）
+  if (p.kind === 'fixed') {
+    if (p.seat === null) throw appErr_(ERR_FIXED_);
+    if (p.drawnAt) return false;
+    p.drawnAt = now_();
+    return true;
+  }
   if (p.seat !== null) return false;
   const free = freeSeats_(db);
   if (!free.length) throw appErr_(ERR_NOSEAT_);
@@ -1203,8 +1236,11 @@ function seatPlace_(settings, seat) {
   return { table: null, num: seat };
 }
 
+function placeLabel_(settings, seat) { const pl = seatPlace_(settings, seat); return pl.table ? pl.table + ' ' + pl.num + '番' : seat + '番'; }
+
 /* 固定席の方の卓。今の卓の一覧に無い卓（シートで書き換えた・卓の設定が変わった）は「未設定」として扱います */
 function fixedTable_(st, p) {
+  if (p.kind === 'fixed' && p.seat !== null) return seatPlace_(st, p.seat).table;
   return p.kind === 'fixed' && p.table && st.tables.some(function (t) { return t.name === p.table; }) ? p.table : null;
 }
 
@@ -1225,14 +1261,16 @@ function isDevUrl_(u) { return /\/dev\/?$/.test(String(u || '')); }
 
 function participantView_(db, p) {
   const st = db.settings;
+  // 席を決めてある固定席の方には、くじを引く方と同じ画面を見せます（くじの演出のあとに、決めてある席が出ます）
+  const staged = p.kind === 'fixed' && p.seat !== null, seat = staged && !p.drawnAt ? null : p.seat;
   return {
     event: st.event,
     name: p.name,
-    kind: p.kind,
-    seat: p.seat,
+    kind: staged ? 'lottery' : p.kind,
+    seat: seat,
     // 卓があるときの表示：「A卓 3番」（固定席の方は、幹事が指定した卓）
-    table: p.kind === 'fixed' ? fixedTable_(st, p) : seatPlace_(st, p.seat).table,
-    tableSeat: p.kind === 'fixed' ? null : seatPlace_(st, p.seat).num,
+    table: p.kind === 'fixed' && !staged ? fixedTable_(st, p) : seatPlace_(st, seat).table,
+    tableSeat: p.kind === 'fixed' && !staged ? null : seatPlace_(st, seat).num,
     tables: st.tables.map(function (t) { return { name: t.name, seats: t.seats }; }),
     drink: p.drink,
     drinkAt: p.drinkAt || '', // ドリンクを保存するときに送り返します（遅れて届いた古い保存で上書きしないため）
@@ -1264,7 +1302,7 @@ function summary_(db) {
     total: db.people.length,
     lottery: lottery.length,
     fixed: db.people.length - lottery.length,
-    seated: lottery.filter(function (p) { return p.seat !== null; }).length,
+    seated: db.people.filter(function (p) { return p.seat !== null; }).length, // 席を決めてある固定席の方も含めます
     seatsLeft: freeSeats_(db).length
   };
 }
@@ -1276,7 +1314,7 @@ function adminState_(db) {
       joinOpen: st.joinOpen, joinUrl: appUrl_(st) && st.joinCode ? appUrl_(st) + '?j=' + st.joinCode : '',
       devUrl: !st.baseUrl && isDevUrl_(rawServiceUrl_()) /* 自動で取れた URL がテスト用（/dev）だった */ },
     people: db.people.map(function (p) {
-      const place = p.kind === 'fixed' ? { table: fixedTable_(st, p), num: null } : seatPlace_(st, p.seat);
+      const place = p.kind === 'fixed' && p.seat === null ? { table: fixedTable_(st, p), num: null } : seatPlace_(st, p.seat);
       return { id: p.id, token: p.token, name: p.name, kind: p.kind, seat: p.seat, table: place.table, tableSeat: place.num, drink: p.drink, drawnAt: p.drawnAt, drinkAt: p.drinkAt, claimedAt: p.claimedAt, fixedLabel: labels[p.id] || null,
         // シートに手で書かれた、読み取れない席番号（dupSeat：ほかの方と重なった席番号。固定席の方は、席番号の列に書かれた内容）
         badSeat: p.seat === null && p.rawSeat !== null ? cellText_(p.rawSeat) : null, dupSeat: !!p.dupSeat && p.seat === null && p.rawSeat !== null };

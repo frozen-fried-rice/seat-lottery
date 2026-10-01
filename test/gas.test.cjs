@@ -437,14 +437,15 @@ test('シートを読むときの正規化: 手で編集された値（数値・
   sh.getRange(3, 7).setValue('2026/09/28 18:30:00'); // 日時（Date になる）
   sh.getRange(4, 2).setValue('12345678901234567890'); // 数字だけのトークン（数値になる→壊れる）
   sh.getRange(4, 4).setValue('固定');
-  sh.getRange(4, 5).setValue(7);                   // 固定の人の席は無視
+  const s2 = [7, 8, 9].find(n => n !== s0 && n !== s1);
+  sh.getRange(4, 5).setValue(s2);                  // 固定の人の席（決めてある席）
   sh.getRange(5, 6).setValue('TRUE');              // ドリンクが TRUE（真偽値）
   sh.getRange(6, 1, 1, 8).setValues([['', '', '手書き 追加', '', '', 'ビール', '', '']]); // ID・トークン無しの行
   const st = admin('adminGetState');
   const by = n => st.people.find(p => p.name === n);
   assert.equal(by('鈴木').seat, s1); assert.equal(typeof by('鈴木').seat, 'number');
   assert.equal(by('鈴木').drawnAt, '2026/09/28 18:30:00');
-  assert.equal(by('佐藤').kind, 'fixed'); assert.equal(by('佐藤').seat, null);
+  assert.equal(by('佐藤').kind, 'fixed'); assert.equal(by('佐藤').seat, s2);
   assert.match(by('佐藤').token, /^[A-Za-z0-9]{8,}$/);
   assert.equal(by('田中').drink, 'TRUE');
   assert.equal(by('手書き 追加').drink, 'ビール');
@@ -1892,7 +1893,7 @@ test('総点検 第3回: 1行に卓を2つ以上書いたら、1つの卓とし�
   assert.deepEqual(st.settings.tables, [{ name: 'テーブル1 窓側', seats: 4 }, { name: 'テーブル 2', seats: 6 }, { name: '2次会', seats: 8 }]);
 });
 
-test('総点検 第3回: 固定席の方の席番号の列に書いた卓の名前はその卓にし、読み取れない内容は消さずに知らせる', () => {
+test('総点検 第3回: 固定席の方の席番号の列に書いた卓の名前はその卓にし（「B卓 1」はその席を決める）、読み取れない内容は消さずに知らせる', () => {
   const { ctx, add, admin, byName } = fresh();
   admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
   add(['社長', '部長', '来賓'], 'fixed');
@@ -1900,7 +1901,7 @@ test('総点検 第3回: 固定席の方の席番号の列に書いた卓の名�
   sh.getRange(2, 5).setValue('A卓'); sh.getRange(3, 5).setValue('B卓 1'); sh.getRange(4, 5).setValue('上座');
   const st = admin('adminGetState');
   assert.deepEqual(st.people.map(p => [p.table, p.badSeat]), [['A卓', null], ['B卓', null], [null, '上座']]);
-  assert.deepEqual(ctx.__mock.values('参加者').slice(1).map(r => [r[3], String(r[4])]), [['固定（A卓）', ''], ['固定（B卓）', ''], ['固定', '上座']]);
+  assert.deepEqual(ctx.__mock.values('参加者').slice(1).map(r => [r[3], String(r[4])]), [['固定（A卓）', ''], ['固定', '5'], ['固定', '上座']]);
   // 卓を選ぶと、書かれていた内容は消える
   admin('adminUpdatePerson', byName('来賓').id, { table: 'B卓' });
   assert.deepEqual([byName('来賓').table, byName('来賓').badSeat], ['B卓', null]);
@@ -2283,6 +2284,88 @@ test('最終確認6: 個別QRの受付が多くても、J列を消して見出�
     assert.equal(admin('adminGetState').people.length, 6, mark);
     assert.equal(call('participantGet', ps[2].token).name, 'c');
   }
+});
+
+test('固定席の席を決めておくと、くじの演出だけ：ほかの方のくじには出ず、ご本人には「くじを引く」のあとにその席が出る', () => {
+  const { ctx, add, admin, call, byName } = fresh();
+  admin('adminSaveSettings', { tables: 'A卓 4\nB卓 2' });
+  add(['来賓'], 'fixed');
+  add(['a', 'b', 'c', 'd', 'e']);
+  const guest = byName('来賓');
+  // 席の番号（通し番号）を決める：A卓 3番 = 3
+  admin('adminUpdatePerson', guest.id, { table: 'A卓', seat: 3 });
+  let g = byName('来賓');
+  assert.deepEqual([g.kind, g.seat, g.table, g.tableSeat, g.drawnAt], ['fixed', 3, 'A卓', 3, null]);
+  assert.deepEqual(ctx.__mock.values('参加者')[1].slice(3, 5).map(String), ['固定', '3']);
+  // ご本人の画面は、くじを引く方と同じ（席はまだ出さない）
+  let v = call('participantGet', guest.token);
+  assert.deepEqual([v.kind, v.seat, v.table, v.tableSeat], ['lottery', null, null, null]);
+  // ほかの方のくじには出ない
+  const seats = ['a', 'b', 'c', 'd', 'e'].map(n => call('participantDraw', byName(n).token).seat);
+  assert.ok(!seats.includes(3), JSON.stringify(seats));
+  assert.equal(new Set(seats).size, 5);
+  // 演出のあとに決めてある席
+  v = call('participantDraw', guest.token);
+  assert.deepEqual([v.kind, v.seat, v.table, v.tableSeat], ['lottery', 3, 'A卓', 3]);
+  assert.ok(byName('来賓').drawnAt);
+  assert.equal(call('participantDraw', guest.token).seat, 3, '2回押しても同じ');
+  assert.equal(call('participantGet', guest.token).seat, 3);
+  // 席だけ消す：決めてある席は残り、演出をやり直せる
+  admin('adminReset', 'seats');
+  g = byName('来賓');
+  assert.deepEqual([g.seat, g.drawnAt], [3, null]);
+  assert.equal(call('participantGet', guest.token).seat, null);
+  assert.equal(byName('a').seat, null);
+  // 「代わりに引く」でも演出済みになる
+  admin('adminDrawOne', guest.id);
+  assert.equal(call('participantGet', guest.token).seat, 3);
+  // 番号なしに戻すと、今まで通り（くじは引かない）
+  admin('adminUpdatePerson', guest.id, { seat: null });
+  g = byName('来賓');
+  assert.deepEqual([g.seat, g.table, g.drawnAt], [null, 'A卓', null]);
+  v = call('participantGet', guest.token);
+  assert.deepEqual([v.kind, v.table], ['fixed', 'A卓']);
+  assert.throws(() => call('participantDraw', guest.token), /固定席の方はくじを引きません/);
+});
+
+test('固定席の席：ほかの方の席・ない席・くじを引く方には指定できない／決めてある席より卓を減らせない', () => {
+  const { add, admin, call, byName } = fresh();
+  admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
+  add(['来賓', '部長'], 'fixed');
+  add(['a']);
+  const s = call('participantDraw', byName('a').token).seat;
+  assert.throws(() => admin('adminUpdatePerson', byName('来賓').id, { seat: s }), /aさんに決まっています/);
+  assert.throws(() => admin('adminUpdatePerson', byName('来賓').id, { seat: 9 }), /その席はありません/);
+  assert.throws(() => admin('adminUpdatePerson', byName('a').id, { seat: 1 }), /固定席の方だけ/);
+  const free = [1, 2, 3, 4, 5, 6, 7, 8].filter(n => n !== s);
+  admin('adminUpdatePerson', byName('来賓').id, { seat: free[0] });
+  assert.throws(() => admin('adminUpdatePerson', byName('部長').id, { seat: free[0] }), /来賓さんに決まっています/);
+  // B卓 の席（8番）を決めてあれば、卓の合計を8より少なくできない
+  admin('adminUpdatePerson', byName('部長').id, { seat: 8 === s ? 7 : 8 });
+  assert.equal(byName('部長').table, 'B卓');
+  assert.throws(() => admin('adminSaveSettings', { tables: 'A卓 4\nB卓 2' }), /さんの席（B卓 4番）が決まっている/); // 8番は部長さんか a さん
+  // 卓だけ選び直すと、別の卓の席は外れる
+  admin('adminUpdatePerson', byName('部長').id, { table: 'A卓' });
+  assert.deepEqual([byName('部長').seat, byName('部長').table], [null, 'A卓']);
+  // くじを引く方に変えると、決めてある席は空きに戻る
+  admin('adminUpdatePerson', byName('来賓').id, { kind: 'lottery' });
+  assert.equal(byName('来賓').seat, null);
+});
+
+test('固定席の席：シートに「A卓 3」「3」と書いても決めてある席になり、卓の名前だけなら卓になる', () => {
+  const { ctx, add, admin, call, byName } = fresh();
+  admin('adminSaveSettings', { tables: 'A卓 4\nB卓 4' });
+  add(['来賓', '部長', '課長'], 'fixed');
+  const sh = ctx.__mock.sheet('参加者');
+  sh.getRange(2, 5).setValue('B卓 2'); sh.getRange(3, 5).setValue(3); sh.getRange(4, 5).setValue('A卓');
+  const st = admin('adminGetState');
+  const by = n => st.people.find(p => p.name === n);
+  assert.deepEqual([by('来賓').seat, by('来賓').table, by('来賓').tableSeat], [6, 'B卓', 2]);
+  assert.deepEqual([by('部長').seat, by('部長').table], [3, 'A卓']);
+  assert.deepEqual([by('課長').seat, by('課長').table], [null, 'A卓']);
+  add(['a', 'b', 'c', 'd', 'e', 'f']);
+  const got = ['a', 'b', 'c', 'd', 'e', 'f'].map(n => call('participantDraw', byName(n).token).seat).sort((x, y) => x - y);
+  assert.deepEqual(got, [1, 2, 4, 5, 7, 8]);
 });
 
 console.log(`gas.test: ${passed} passed, ${failed} failed`);

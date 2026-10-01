@@ -336,6 +336,8 @@ footer{max-width:1180px;margin:10px auto;padding:0 24px 30px;font-size:13px;colo
  <select id="editkind"><option value="lottery">くじを引く（抽選席）</option><option value="fixed">くじを引かない（固定席）</option></select>
  <p class="hint" id="editkindhint"></p>
  <div id="edittablewrap" hidden><label for="edittable">卓（固定席の方）</label><select id="edittable"></select></div>
+ <div id="editseatwrap" hidden><label for="editseat">席の番号（固定席の方）</label><select id="editseat"></select>
+  <p class="hint" style="margin:6px 0 0">番号を決めておくと、ご本人はほかの方と同じように「くじを引く」を押し、演出のあとにこの席が出ます。</p></div>
  <label for="editdrink">1杯目のドリンク</label>
  <select id="editdrink"></select>
  <div id="editotherwrap" hidden><label for="editother">ドリンク名（30文字まで）</label><input id="editother" maxlength="30" autocomplete="off" placeholder="例：ジンジャーエール"></div>
@@ -645,16 +647,18 @@ $('askdialog').addEventListener('close',()=>askDone(false));
 function pendingCount(){return S.people.filter(p=>p.kind==='lottery'&&p.seat==null).length;}
 function person(id){return S?S.people.find(p=>p.id===id)||null:null;}
 function placeText(p){return p.table?p.table+' '+p.tableSeat+'番':p.seat+'番';}
-function seatText(p){return p.kind==='fixed'?(p.table?'固定（'+p.table+'）':(p.fixedLabel||'固定席')):p.seat==null?'未':placeText(p);}
-function stateText(p){return p.kind==='fixed'?(p.table?'固定席（'+p.table+'）':'固定席'):p.seat==null?'未抽選':placeText(p);}
-function tsLabel(p,g){return p.kind==='fixed'?'固定':p.tableSeat!=null&&!g.extra?p.tableSeat+'番':'—';}
+// 席を決めてある固定席の方（くじの演出のあとに、その席が出ます。drawnAt はご本人が演出を見た時刻）
+function staged(p){return p.kind==='fixed'&&p.seat!=null;}
+function seatText(p){return staged(p)?'固定 '+placeText(p):p.kind==='fixed'?(p.table?'固定（'+p.table+'）':(p.fixedLabel||'固定席')):p.seat==null?'未':placeText(p);}
+function stateText(p){return staged(p)?'固定席（'+placeText(p)+(p.drawnAt?'':'・演出前')+'）':p.kind==='fixed'?(p.table?'固定席（'+p.table+'）':'固定席'):p.seat==null?'未抽選':placeText(p);}
+function tsLabel(p,g){return p.tableSeat!=null&&!g.extra?p.tableSeat+'番'+(staged(p)?'（固定）':''):p.kind==='fixed'?'固定':'—';}
 function hasTables(){return !!(S&&S.settings.tables.length);}
 function drinkText(p){return p.drink?p.drink:'未登録';}
 function timeText(t){if(!t)return '';const m=String(t).match(/(\d{1,2}:\d{2})(:\d{2})?/);return m?m[1]:String(t);}
 function linkFor(p){const u=S&&S.settings.appUrl;return u&&p.token?u+(u.includes('?')?'&':'?')+'t='+encodeURIComponent(p.token):'';}
 // 並び順：席番号順。卓のある固定席の方は、その卓の最後に並べます
 function sortKey(p,i){
- if(p.kind==='fixed'){
+ if(p.kind==='fixed'&&p.seat==null){
   if(p.table&&hasTables()){let end=0;for(const t of S.settings.tables){end+=t.seats;if(t.name===p.table)return end+0.5+i/10000;}}
   return 2000+i;
  }
@@ -697,7 +701,7 @@ function render(){
  const warns=[];
  if(over>0)warns.push('くじを引く方が'+sm.lottery+'人に対して、抽選できる席は'+st.seats+'席です。'+over+'人分の席が足りません。'+(hasTables()?'「名簿・設定」の卓の設定で席数を増やすか、固定席に変えてください。':'「名簿・設定」で席数を増やすか、固定席に変えてください。'));
  const who=list=>list.slice(0,5).map(p=>p.name+'さん（「'+p.badSeat+'」）').join('、')+(list.length>5?' ほか'+(list.length-5)+'人':'');
- const bad=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&!p.dupSeat),dup=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&p.dupSeat),fxb=S.people.filter(p=>p.badSeat&&p.kind==='fixed');
+ const bad=S.people.filter(p=>p.badSeat&&p.kind!=='fixed'&&!p.dupSeat),dup=S.people.filter(p=>p.badSeat&&p.dupSeat),fxb=S.people.filter(p=>p.badSeat&&p.kind==='fixed'&&!p.dupSeat);
  if(bad.length)warns.push('「参加者」シートの席番号を読み取れない方がいます：'+who(bad)+'。直すまでは未抽選として扱います。シートで「'+(hasTables()?'A卓 3':'12')+'」のように直すか、その方の「修正」で消してください。'+(hasTables()?'（卓に無い番号・席数より大きい番号も読み取れません）':'（抽選する席の数より大きい番号も読み取れません）'));
  if(dup.length)warns.push('「参加者」シートの席番号が、ほかの方と重なっている方がいます：'+who(dup)+'。くじで先に決まっていた方の席をそのままにし、この方は直すまで未抽選として扱います。シートで別の席番号に直すか、その方の「修正」で消してください。');
  if(fxb.length)warns.push('固定席の方の「席番号」の列に、卓として読み取れない内容が書かれています：'+who(fxb)+'。書かれた内容はシートに残しています。固定席の方の卓は「修正」で選んでください（選ぶと、この内容は消えます）。');
@@ -747,8 +751,8 @@ function tableGroups(){
  }
  return groups.concat([noseat,notable].filter(g=>g.people.length));
 }
-// 「くじの席 5 / 8席 ＋固定 1人」（固定席の方は、卓の席数とは別に数えます）
-function tableCount(g){const fx=g.people.filter(p=>p.kind==='fixed').length;return (g.people.length-fx)+' / '+g.seats+'席'+(fx?' ＋固定'+fx+'人':'');}
+// 「席 5 / 8席 ＋固定 1人」（席を決めていない固定席の方は、卓の席数とは別に数えます）
+function tableCount(g){const fx=g.people.filter(p=>p.kind==='fixed'&&p.seat==null).length;return (g.people.length-fx)+' / '+g.seats+'席'+(fx?' ＋固定'+fx+'人':'');}
 function renderTables(){
  const on=hasTables();$('tablesummary').hidden=!on;
  if(!on)return;
@@ -827,7 +831,7 @@ function renderQr(){
    p.kind==='lottery'&&p.seat==null?el('button',{class:'small',text:'代わりに引く','data-fk':'q:draw:'+p.id,'aria-label':p.name+'さんの代わりにくじを引く',disabled:!sm.seatsLeft,onclick:()=>drawOne(p.id)}):null);
   const tag=p.kind==='fixed'?el('span',{class:'tag',text:stateText(p)}):p.seat==null?el('span',{class:'tag wait',text:'未抽選'}):el('span',{class:'tag ok',text:placeText(p)});
   return el('tr',null,
-   el('td',{class:'seat hide-sm'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:p.kind==='fixed'?(p.table||p.fixedLabel||'—'):p.seat==null?'—':(p.table?p.table+' '+p.tableSeat:String(p.seat))}),
+   el('td',{class:'seat hide-sm'+(p.kind==='fixed'?' fixed':p.seat==null?' soft':''),text:p.kind==='fixed'&&p.seat==null?(p.table||p.fixedLabel||'—'):p.seat==null?'—':(p.table?p.table+' '+p.tableSeat:String(p.seat))}),
    el('td',{text:p.name}),
    el('td',null,tag,p.claimedAt?el('span',{class:'tag ok',text:'受付済み',title:'受付：'+p.claimedAt,style:'margin-left:4px'}):null),
    el('td',{class:(p.drink?'':'muted ')+'hide-sm',text:drinkText(p)}),
@@ -916,7 +920,7 @@ $('drawall').onclick=async()=>{
 };
 
 /* 修正ダイアログ */
-const EDIT_FIELDS=['editname','editkind','editdrink','editother','edittable'];
+const EDIT_FIELDS=['editname','editkind','editdrink','editother','edittable','editseat'];
 function openEdit(id){
  const p=person(id);if(!p)return;
  editing={id,name:p.name,kind:p.kind,drink:p.drink||null,fk:lastFk};
@@ -930,7 +934,7 @@ function openEdit(id){
 /* 修正ダイアログに値を入れます。開いている間に最新の状態が届いたときは、まだ触っていない欄だけを最新にします */
 function fillEdit(p){
  const t=f=>!!$(f).dataset.touched;
- editing.name=p.name;editing.kind=p.kind;editing.drink=p.drink||null;editing.drinkAt=p.drinkAt||'';editing.table=p.kind==='fixed'?(p.table||''):''; // 変更の比較は最新の状態と行います
+ editing.name=p.name;editing.kind=p.kind;editing.drink=p.drink||null;editing.drinkAt=p.drinkAt||'';editing.table=p.kind==='fixed'?(p.table||''):'';editing.seat=p.kind==='fixed'&&p.seat!=null?String(p.seat):''; // 変更の比較は最新の状態と行います
  const ts=$('edittable'),tsig=JSON.stringify(S.settings.tables);
  if(ts.dataset.sig!==tsig){
   // 開いている間に卓の一覧が変わったら作り直します（選んでいた卓がまだあれば、選んだままにします）
@@ -939,6 +943,7 @@ function fillEdit(p){
   if(t('edittable')){if(S.settings.tables.some(x=>x.name===keep))ts.value=keep;else delete ts.dataset.touched;}
  }
  if(!t('edittable'))ts.value=editing.table;
+ fillSeats();
  $('edittitle').textContent=p.name+' さん';
  if(!t('editname'))$('editname').value=p.name;
  if(!t('editkind'))$('editkind').value=p.kind;
@@ -958,16 +963,33 @@ function fillEdit(p){
 }
 for(const f of EDIT_FIELDS)$(f).addEventListener('input',()=>{$(f).dataset.touched='1';});
 function toggleOther(){const o=$('editdrink').value==='other';$('editotherwrap').hidden=!o;$('editother').required=o;}
+/* 固定席の方の席の番号：選んだ卓の席（卓が無いときは通し番号）。ほかの方に決まっている席は選べません */
+function fillSeats(){
+ if(!editing)return;
+ const ss=$('editseat'),tb=hasTables(),tname=$('edittable').value,taken=new Map();
+ for(const q of S.people)if(q.seat!=null&&q.id!==editing.id)taken.set(q.seat,q.name);
+ let start=0,count=tb?0:S.settings.seats;
+ if(tb){for(const x of S.settings.tables){if(x.name===tname){count=x.seats;break;}start+=x.seats;}}
+ const opts=[el('option',{value:'',text:tb&&!tname?'（先に卓を選んでください）':'番号なし（くじは引きません）'})];
+ for(let n=1;n<=count;n++){const g=start+n,who=taken.get(g);opts.push(el('option',{value:String(g),text:n+'番'+(who?'（'+who+'さん）':''),disabled:!!who}));}
+ const keep=t=>[...ss.options].some(o=>o.value===t&&!o.disabled);
+ const want=ss.dataset.touched?ss.value:editing.seat;
+ const sig=JSON.stringify(opts.map(o=>[o.value,o.text,o.disabled]));
+ if(ss.dataset.sig!==sig){ss.replaceChildren(...opts);ss.dataset.sig=sig;}
+ if(keep(want))ss.value=want;else{ss.value='';if(ss.dataset.touched&&want)delete ss.dataset.touched;}
+}
 function kindHint(){
  const p=editing&&person(editing.id),toFixed=$('editkind').value==='fixed';
  $('edittablewrap').hidden=!(toFixed&&hasTables());
- $('editkindhint').textContent=p&&toFixed&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります。':toFixed?'固定席の方はくじを引きません。ドリンクだけ登録できます。':'くじを引いて席を決める方です。';
+ $('editseatwrap').hidden=!toFixed;
+ $('editkindhint').textContent=p&&toFixed&&p.kind==='lottery'&&p.seat!=null?'固定席に変えると、'+placeText(p)+'は空きに戻ります（下で席の番号を選び直せます）。':toFixed?'席の番号を決めると、くじの演出のあとにその席が出ます。番号なしなら、くじは引かずドリンクだけ登録します。':'くじを引いて席を決める方です。';
  $('clearseatwrap').hidden=!(p&&(p.kind==='lottery'&&(p.seat!=null||p.badSeat)&&!toFixed||p.kind==='fixed'&&p.badSeat&&toFixed));
  $('clearseatlabel').textContent=p&&p.seat!=null?'席（'+placeText(p)+'）を空きに戻す':p&&p.badSeat?(p.kind==='fixed'?'席番号の列に書かれた内容':p.dupSeat?'ほかの方と重なっている席番号':'読み取れない席番号')+'（「'+p.badSeat+'」）を消す':'席を空きに戻す';
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
-$('edittable').onchange=()=>{$('edittable').dataset.touched='1';};
+$('edittable').onchange=()=>{$('edittable').dataset.touched='1';fillSeats();};
+$('editseat').onchange=()=>{$('editseat').dataset.touched='1';};
 $('editcancel').onclick=()=>$('editdialog').close();
 $('editform').onsubmit=e=>{
  e.preventDefault();
@@ -983,6 +1005,7 @@ $('editform').onsubmit=e=>{
  if($('editclearseat').checked&&!$('clearseatwrap').hidden)patch.clearSeat=true;
  if($('editrelease').checked&&!$('releasewrap').hidden)patch.releaseClaim=true;
  if(!$('edittablewrap').hidden){const tv=$('edittable').value;if(tv!==editing.table||patch.kind==='fixed')patch.table=tv||null;}
+ if(!$('editseatwrap').hidden){const sv=$('editseat').value;if(sv!==editing.seat||patch.kind==='fixed'||patch.table!==undefined)patch.seat=sv?Number(sv):null;}
  if(!Object.keys(patch).length){$('editdialog').close();return;}
  const id=editing.id;
  act('adminUpdatePerson',[id,patch],()=>{$('editdialog').close();ok(name+'さんを修正しました。');});
@@ -1113,7 +1136,7 @@ $('printbtn').onclick=()=>{
  for(const p of S.people){
   const link=linkFor(p),svg=link?qrSvgCached(link):null;
   if(!svg){missing++;continue;}
-  root.append(qrCard(p.name+' さん',svg,p.kind==='fixed'?'スマホのカメラで読み取って、ドリンクを選んでください':'スマホのカメラで読み取って、くじを引いてドリンクを選んでください'));
+  root.append(qrCard(p.name+' さん',svg,p.kind==='fixed'&&p.seat==null?'スマホのカメラで読み取って、ドリンクを選んでください':'スマホのカメラで読み取って、くじを引いてドリンクを選んでください'));
  }
  if(!root.children.length){showError(Error('印刷できるQRコードがありません。'));return;}
  $('qrstate').textContent=root.children.length+'人分のカードを印刷します。'+(missing?missing+'人分はQRコードを作れませんでした。':'');
@@ -1130,7 +1153,7 @@ function stamp(){const d=new Date(),z=n=>String(n).padStart(2,'0');return d.getF
 $('csv').onclick=()=>{
  const tb=hasTables();
  const rows=[(tb?['卓','卓内の席']:[]).concat(['席番号','区分','お名前','ドリンク','ドリンク登録時刻'])];
- for(const p of sorted(S.people))rows.push((tb?[p.table||(p.kind==='fixed'?'未設定':'未抽選'),p.kind==='fixed'?'固定':p.tableSeat==null?'':p.tableSeat]:[]).concat([p.kind==='fixed'?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,p.drink||'未登録',p.drinkAt||'']));
+ for(const p of sorted(S.people))rows.push((tb?[p.table||(p.kind==='fixed'?'未設定':'未抽選'),p.kind==='fixed'&&p.seat==null?'固定':p.tableSeat==null?'':p.tableSeat]:[]).concat([p.kind==='fixed'&&p.seat==null?(p.fixedLabel||'固定席'):p.seat==null?'未抽選':p.seat,p.kind==='fixed'?'固定席':'抽選席',p.name,p.drink||'未登録',p.drinkAt||'']));
  downloadCsv(rows,'席くじ-ドリンク一覧-'+stamp()+'.csv');
  ok('CSVを保存しました。');
 };
