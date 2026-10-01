@@ -1209,7 +1209,7 @@ async function step(name, fn) {
       await ph.evaluate(() => localStorage.removeItem('sekikuji.join.token'));
       await open(ph, { j: code });
       await ph.locator('#join').waitFor({ state: 'visible' });
-      assert.match(await ph.getAttribute('#joinsearch', 'placeholder'), /例：山田/);
+      assert.doesNotMatch(await ph.getAttribute('#joinsearch', 'placeholder'), /やま/, '例にかなを出さない（漢字の名前に当たらないため）');
       await ph.fill('#joinsearch', 'ひきなお');
       assert.match(await text(ph, '#joinlist'), /該当するお名前がありません。[\s\S]*漢字の一部/);
       await ph.fill('#joinsearch', '引直');
