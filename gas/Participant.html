@@ -21,7 +21,8 @@ button:disabled{cursor:default;opacity:.55}
 @keyframes pop{0%{transform:scale(.6);opacity:.3}60%{transform:scale(1.12)}100%{transform:scale(1)}}
 .who{font-size:19px;font-weight:700;margin:0;overflow-wrap:anywhere}
 .hint{color:#617087;font-size:14px;line-height:1.9}
-.again{margin-top:18px;font-size:14px;min-height:44px;padding:10px 16px;background:transparent;color:#5b708c}
+.again,.switch{font-size:14px;min-height:44px;padding:10px 16px;background:transparent;color:#5b708c}
+.again{margin-top:18px}
 .fixedtag{display:inline-block;background:#193961;color:#fff;border-radius:10px;padding:2px 12px;margin:0 2px}
 .err{background:#fff0ee;color:#a02a18;border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.7;margin:0 0 16px;text-align:left;overflow-wrap:anywhere}
 .loading{color:#617087;font-size:16px;margin:0}
@@ -31,14 +32,15 @@ button:disabled{cursor:default;opacity:.55}
 .drinks .wide{grid-column:1/-1}
 .drinks .later{background:#fff;border-color:#cfd9e6;color:#44566f}
 .other{display:flex;gap:8px;margin-top:10px}
-.other input{flex:1;min-width:0;font:inherit;font-size:17px;min-height:56px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff}
+.search,.other input{font:inherit;font-size:17px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff}
+.other input{flex:1;min-width:0;min-height:56px}
 .other button{background:#2255aa;color:#fff;padding:10px 18px;flex:none}
 .msg{margin:14px 0 0;font-size:15px;line-height:1.8;min-height:1.8em;overflow-wrap:anywhere}
 .msg.ok{color:#1d6b3a;font-weight:700}
 .msg.ng{color:#a02a18;font-weight:700}
 .current{font-size:22px;font-weight:800;color:#193961;margin:8px 0 0;overflow-wrap:anywhere}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
-.search{width:100%;font:inherit;font-size:17px;min-height:52px;padding:10px 14px;border:2px solid #cfd9e6;border-radius:14px;color:#182d4a;background:#fff;margin:0 0 12px}
+.search{width:100%;min-height:52px;margin:0 0 12px}
 .names{display:grid;gap:8px;text-align:left}
 .names button{width:100%;min-height:54px;text-align:left;font-size:17px;padding:12px 16px;overflow-wrap:anywhere;display:flex;justify-content:space-between;align-items:center;gap:10px}
 .names button .tag{font-size:12px;font-weight:700;color:#5b708c;flex:none}
@@ -46,10 +48,10 @@ button:disabled{cursor:default;opacity:.55}
 .names .empty{color:#617087;font-size:15px;margin:6px 2px}
 .confirmname{font-size:26px;font-weight:800;color:#193961;margin:6px 0 4px;overflow-wrap:anywhere}
 .stack{display:grid;gap:10px;margin-top:18px}
-.switch{background:transparent;color:#5b708c;font-size:14px;min-height:44px;padding:10px 16px}
-.linebtn{display:flex;align-items:center;justify-content:center;gap:8px;min-height:52px;padding:12px 18px;border-radius:14px;background:#06c755;color:#fff;font-weight:700;font-size:17px;text-decoration:none}
+.linebtn,.linkbtn{display:flex;align-items:center;justify-content:center;border-radius:14px;font-weight:700;text-decoration:none}
+.linebtn{gap:8px;min-height:52px;padding:12px 18px;background:#06c755;color:#fff;font-size:17px}
 .linebtn:focus-visible{outline:3px solid #183659;outline-offset:2px}
-.linkbtn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:10px 18px;border-radius:14px;background:#e9eff8;color:#183659;font-weight:700;text-decoration:none}
+.linkbtn{display:inline-flex;min-height:48px;padding:10px 18px;background:#e9eff8;color:#183659}
 button:focus-visible,input:focus-visible,.linkbtn:focus-visible,[tabindex]:focus-visible{outline:3px solid #e89b17;outline-offset:3px}
 #mylinkbox{padding:18px 20px}
 [hidden]{display:none!important}
@@ -201,6 +203,8 @@ function syncLine(){
  if(v.link)lines.push('','自分のページ（ドリンクの変更もここから）：',v.link);
  $('lineshare').href='https://line.me/R/share?text='+encodeURIComponent(lines.join('\n'));
 }
+// エラーの欄に文を出します（空なら隠します）
+function showErr(id,m){const e=$(id);e.textContent=m||'';e.hidden=!m;return e;}
 function focusEl(el){if(el&&!el.hidden){try{el.focus({preventScroll:true});}catch(e){}}}
 function bad(msg){
  gen++;resetPerson();show('bad');msg=msg||'QRコードが無効です。受付にお声がけください。';
@@ -216,7 +220,7 @@ function bad(msg){
 // 前の方の入力・メッセージ・演出を片付けます（共通QRで次の方に替わるとき）
 function resetPerson(){
  stopRoll();drawing=false;saving=false;claiming=false;savedFocus='';
- otherOpen=false;$('otherinput').value='';msg('','');syncOther();resetDraw();
+ otherOpen=false;$('otherinput').value='';msg('');syncOther();resetDraw();
 }
 function resetDraw(){$('drawerr').hidden=true;$('draw').disabled=false;$('draw').textContent='くじを引く';}
 // 個別のトークンが使えなくなったとき（幹事がQRを作り直した・受付をやり直した）。共通QRなら名前選びに戻ります
@@ -224,8 +228,9 @@ function badToken(m){
  if(joinCode){forget(token);$('joinsearch').value='';joinLoad('このスマホで前に受付した情報は使えなくなりました（受付のやり直し・QRの作り直しなど）。もう一度お名前を選んでください。');}
  else bad(m);
 }
+const setEvent=ev=>document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=ev||'';e.hidden=!ev;});
 function setCommon(v){
- document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=v.event||'';e.hidden=!v.event;});
+ setEvent(v.event);
  $('name').textContent=v.name+' さん';
  $('name2').textContent=v.name+' さんのお席';
  const f=$('fixedname');f.replaceChildren(document.createTextNode(v.name+' さんは '));
@@ -316,9 +321,9 @@ function joinLoad(message){
  token='';view=null;picked=null;show('loading');$('drinkbox').hidden=true;
  run('joinList',[joinCode,deviceKey()],r=>{
   joinPeople=r.people||[];
-  document.querySelectorAll('[data-ev]').forEach(e=>{e.textContent=r.event||'';e.hidden=!r.event;});
+  setEvent(r.event);
   show('join');renderJoin();
-  const e=$('joinerr');e.textContent=message||'';e.hidden=!message;
+  const e=showErr('joinerr',message);
   focusEl(message?e:$('joinh'));
  },m=>bad(m));
 }
@@ -337,7 +342,7 @@ function renderJoin(){
    const t=document.createElement('span');t.className='tag';t.textContent=p.mine?'このスマホで受付済み':'受付済み';b.append(t);
    if(p.mine){b.onclick=()=>{if(claiming)return;picked=p;show('loading');claim();};b.setAttribute('aria-label',p.name+'（このスマホで受付済み。押すと開きます）');}
    // 個別のQRコード・リンクで受付した方：押すと、そのQRコード・リンクから開くよう案内します（ご本人が名前を選べずに困らないように）
-   else if(p.link){b.className='claimed';b.onclick=()=>{const e=$('joinerr');e.textContent='「'+p.name+'」さんは、個別のQRコード（またはLINEなどで届いたリンク）ですでに受付済みです。ご本人の場合は、そのQRコード・リンクから開いてください。見つからないときは受付にお声がけください。';e.hidden=false;focusEl(e);e.scrollIntoView({block:'center',behavior:reduced()?'auto':'smooth'});};b.setAttribute('aria-label',p.name+'（受付済み。押すと開き方の案内が出ます）');}
+   else if(p.link){b.className='claimed';b.onclick=()=>{const e=showErr('joinerr','「'+p.name+'」さんは、個別のQRコード（またはLINEなどで届いたリンク）ですでに受付済みです。ご本人の場合は、そのQRコード・リンクから開いてください。見つからないときは受付にお声がけください。');focusEl(e);e.scrollIntoView({block:'center',behavior:reduced()?'auto':'smooth'});};b.setAttribute('aria-label',p.name+'（受付済み。押すと開き方の案内が出ます）');}
    else{b.disabled=true;b.setAttribute('aria-label',p.name+'（受付済み）');}
   }else b.onclick=()=>pick(p);
   items.push(b);
@@ -373,7 +378,7 @@ function claim(){
   claiming=false;$('confirmyes').textContent='はい、自分です';$('confirmno').disabled=false;
   if(transient(m)){
    if(shown!=='confirm'){joinLoad(m);return;}
-   $('confirmyes').disabled=false;const e=$('confirmerr');e.textContent=m;e.hidden=false;focusEl($('confirmyes'));return;
+   $('confirmyes').disabled=false;showErr('confirmerr',m);focusEl($('confirmyes'));return;
   }
   if(/受付済み/.test(m)||/該当する方/.test(m)){$('joinsearch').value='';joinLoad(m);return;}
   bad(m);
@@ -410,7 +415,6 @@ function draw(){
  const t0=Date.now(),min=reduced()||document.hidden?0:1500;
  let got=null,timer=null;
  if(min){
-  $('name2').textContent=view.name+' さんのお席';
   show('result');$('resulthint').hidden=true;$('again').hidden=true;
   startRoll(view.seatsLeft);
  }else btn.textContent='抽選しています…';
@@ -428,12 +432,12 @@ function draw(){
  },m=>{
   if(timer)clearTimeout(timer);
   stopRoll();$('announce').textContent='';show('intro');
-  const showErr=()=>{const e=$('drawerr');e.textContent=m;e.hidden=false;btn.disabled=false;btn.textContent='もう一度くじを引く';focusEl(btn);};
-  showErr();
+  const drawErr=()=>{showErr('drawerr',m);btn.disabled=false;btn.textContent='もう一度くじを引く';focusEl(btn);};
+  drawErr();
   // 幹事が区分を変えた・QRを作り直したなどのときは、最新の状態を読み直して画面を切り替える
   if(!transient(m)){
    btn.disabled=true;
-   run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)showErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else{btn.disabled=false;const a=document.activeElement;if(!a||a===document.body)focusEl(btn);}});
+   run('participantGet',[token],v=>{drawing=false;render(v,true);if(v.kind!=='fixed'&&v.seat==null)drawErr();},m2=>{drawing=false;syncSwitch();if(/QRコード/.test(m2))badToken(m2);else{btn.disabled=false;const a=document.activeElement;if(!a||a===document.body)focusEl(btn);}});
   }else{drawing=false;syncSwitch();}
  });
 }
@@ -470,13 +474,13 @@ function isOther(d){return d!=null&&d!==UNDECIDED&&!(view.drinks||[]).includes(d
 function renderDrink(visible){
  const box=$('drinkbox'),list=$('drinklist');box.hidden=!visible;
  // 描き直しても押したボタンにフォーカスを残す
- const a=document.activeElement,keep=(a&&list.contains(a)?(a.id||a.dataset.key||''):'')||(!saving?savedFocus:'');
+ const a=document.activeElement,keep=(a&&list.contains(a)?keyOf(a):'')||(!saving?savedFocus:'');
  if(!saving)savedFocus=''; // 使わなかったときも消します（次の方の画面や、あとの描き直しで使わないように）
  if(!visible||!view)return;
  const d=view.drink==null?null:String(view.drink);
  // 保存・エラーのあとに残す文は、そのときの登録と受付の状態に結び付け、あとでサーバーの状態が変わったら（幹事が変更・再開など）ふつうの表示に戻します
  const m=$('drinkmsg'),st=d+'|'+view.drinkOpen;
- if(m.dataset.keep==='1')m.dataset.keep=st;else if(m.dataset.keep&&m.dataset.keep!==st&&!saving)msg('','');
+ if(m.dataset.keep==='1')m.dataset.keep=st;else if(m.dataset.keep&&m.dataset.keep!==st&&!saving)msg('');
  if(!view.drinkOpen){
   $('drinkopen').hidden=true;$('drinkclosed').hidden=false;
   $('drinkcurrent').textContent=d==null?'登録はありません':d===UNDECIDED?'未定（あとで決める）':d;
@@ -485,34 +489,26 @@ function renderDrink(visible){
   return;
  }
  $('drinkopen').hidden=false;$('drinkclosed').hidden=true;
- const items=[];
- for(const m of view.drinks||[]){
-  const b=document.createElement('button');b.type='button';b.textContent=m;b.dataset.key='m:'+m;
-  b.className=d===m?'sel':'';b.setAttribute('aria-pressed',String(d===m));
-  b.onclick=()=>{otherOpen=false;syncOther();save(m);};
-  items.push(b);
- }
- const o=document.createElement('button');o.type='button';o.id='otherbtn';
- o.textContent=isOther(d)?'その他：'+d:'その他（入力）';
- o.className='wide'+(isOther(d)?' sel':'');o.setAttribute('aria-pressed',String(isOther(d)));
- o.setAttribute('aria-expanded',String(otherOpen));
- o.onclick=()=>{
+ // 選んでいるボタンは .sel と aria-pressed で示します
+ const btn=(text,key,cls,sel,click)=>{const b=document.createElement('button');b.type='button';b.textContent=text;if(key)b.dataset.key=key;b.className=cls+(sel?(cls?' sel':'sel'):'');b.setAttribute('aria-pressed',String(sel));b.onclick=click;return b;};
+ const choose=x=>()=>{otherOpen=false;syncOther();save(x);},other=isOther(d);
+ const items=(view.drinks||[]).map(m=>btn(m,'m:'+m,'',d===m,choose(m)));
+ const o=btn(other?'その他：'+d:'その他（入力）','','wide',other,()=>{
   otherOpen=!otherOpen;syncOther();
   if(otherOpen){const i=$('otherinput');if(!i.value&&isOther(view.drink))i.value=view.drink;i.focus();}
-  else if($('drinkmsg').classList.contains('ng'))msg('',''),renderDrink(true); // 閉じたら入力エラーの表示も消す
- };
- items.push(o);
- const l=document.createElement('button');l.type='button';l.textContent='あとで決める（未定）';
- l.className='wide later'+(d===UNDECIDED?' sel':'');l.dataset.key='later';l.setAttribute('aria-pressed',String(d===UNDECIDED));
- l.onclick=()=>{otherOpen=false;syncOther();save(UNDECIDED);};
- items.push(l);
+  else if($('drinkmsg').classList.contains('ng'))msg(''),renderDrink(true); // 閉じたら入力エラーの表示も消す
+ });
+ o.id='otherbtn';o.setAttribute('aria-expanded',String(otherOpen));
+ items.push(o,btn('あとで決める（未定）','later','wide later',d===UNDECIDED,choose(UNDECIDED)));
  list.replaceChildren(...items);
- if(keep){const t=items.find(x=>(x.id||x.dataset.key)===keep);if(t)t.focus({preventScroll:true});}
+ if(keep){const t=items.find(x=>keyOf(x)===keep);if(t)t.focus({preventScroll:true});}
  syncOther();setBusy(saving);
  if(!saving&&!$('drinkmsg').dataset.keep){
   msg(d==null?'':(d===UNDECIDED?'「未定」で登録しています。決まったら選び直してください。':'「'+d+'」で登録済みです。変更もできます。'),'');
  }
 }
+// ドリンクのボタンの見分け（フォーカスを戻すため）
+const keyOf=x=>x.id||x.dataset.key||'';
 function syncOther(){
  $('otherform').hidden=!otherOpen;
  const o=$('otherbtn');if(o)o.setAttribute('aria-expanded',String(otherOpen));
@@ -521,7 +517,7 @@ function syncOther(){
 function restoreSaved(){
  const k=savedFocus;savedFocus='';
  if(!k||(document.activeElement&&document.activeElement!==document.body))return;
- const t=k==='otherbtn'&&otherOpen?$('otherinput'):[...$('drinklist').children].find(x=>(x.id||x.dataset.key)===k);
+ const t=k==='otherbtn'&&otherOpen?$('otherinput'):[...$('drinklist').children].find(x=>keyOf(x)===k);
  if(t&&!t.disabled&&!$('drinkbox').hidden)focusEl(t);
 }
 function setBusy(b){
@@ -539,9 +535,9 @@ function save(drink){
  drink=clean(drink);
  if(!drink){msg('ドリンク名を入力してください。','ng',true);$('otherinput').focus();return;}
  if(drink.length>30){msg('ドリンク名は30文字以内で入力してください。','ng',true);return;}
- const fa=document.activeElement;savedFocus=fa&&$('drinklist').contains(fa)?(fa.id||fa.dataset.key||''):(fa&&(fa.id==='othersave'||fa.id==='otherinput')?'otherbtn':'');
+ const fa=document.activeElement;savedFocus=fa&&$('drinklist').contains(fa)?keyOf(fa):(fa&&(fa.id==='othersave'||fa.id==='otherinput')?'otherbtn':'');
  saving=true;setBusy(true);msg('保存しています…','',true);
- run('participantSetDrink',[token,drink,(view&&view.drinkAt)||''],v=>{
+ run('participantSetDrink',[token,drink,view.drinkAt||''],v=>{
   saving=false;
   if(!isOther(v.drink))$('otherinput').value='';
   otherOpen=false;
@@ -567,7 +563,7 @@ function start(){
    token=typeof p.t==='string'?p.t.trim():'';preview=p.preview==='1';
    joinCode=!token&&typeof p.j==='string'?p.j.trim():'';
    if(joinCode){joinStart();return;}
-   if(!token){bad('QRコードが無効です。受付にお声がけください。');return;}
+   if(!token){bad();return;}
    load();
   });
  }catch(e){bad('この画面を開けませんでした。受付でお渡ししたQRコードから開いてください。');}
