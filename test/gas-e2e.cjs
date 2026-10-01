@@ -1624,9 +1624,11 @@ async function step(name, fn) {
       assert.match(await text(pg, '#editerror'), /確認 来賓二さんに決まりました/);
       await pg.click('#editform button[type=submit]');
       await pg.waitForTimeout(400);
-      assert.equal(await pg.isVisible('#editdialog'), true, '選び直すまで保存しない');
-      assert.equal(byName('確認 来賓一').seat, null);
-      await pg.click('#editcancel');
+      assert.equal(await pg.isVisible('#editdialog'), true, '一度は保存を止める');
+      assert.match(await text(pg, '#editerror'), /もう一度「保存」/);
+      await pg.click('#editform button[type=submit]'); // このままでよければ、もう一度押すと保存できる
+      await waitStatus(pg, /確認 来賓一さんを修正しました/);
+      assert.deepEqual([byName('確認 来賓一').seat, byName('確認 来賓一').table], [null, t0.name]);
       // 「席が決まった方」はくじを引く方だけを数える
       await pg.click('#tab-qr');
       const sm = state().summary, seatedLottery = state().people.filter(p => p.kind === 'lottery' && p.seat != null).length;

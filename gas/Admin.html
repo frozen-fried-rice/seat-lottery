@@ -996,7 +996,7 @@ function kindHint(){
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
-$('edittable').onchange=()=>{$('edittable').dataset.touched='1';fillSeats();};
+$('edittable').onchange=()=>{$('edittable').dataset.touched='1';delete $('editseat').dataset.lost;fillSeats();};
 $('editseat').onchange=()=>{$('editseat').dataset.touched='1';delete $('editseat').dataset.lost;};
 $('editcancel').onclick=()=>$('editdialog').close();
 $('editform').onsubmit=e=>{
@@ -1013,7 +1013,8 @@ $('editform').onsubmit=e=>{
  if($('editclearseat').checked&&!$('clearseatwrap').hidden)patch.clearSeat=true;
  if($('editrelease').checked&&!$('releasewrap').hidden)patch.releaseClaim=true;
  if(!$('edittablewrap').hidden){const tv=$('edittable').value;if(tv!==editing.table||patch.kind==='fixed')patch.table=tv||null;}
- if(!$('editseatwrap').hidden&&$('editseat').dataset.lost){$('editerror').textContent='選んでいた席は、ほかの方に決まりました。席を選び直してください。';$('editerror').hidden=false;$('editseat').focus();return;}
+ // 一度だけ止めます（もう一度「保存」を押せば、そのまま「番号なし」などで保存できます）
+ if(!$('editseatwrap').hidden&&$('editseat').dataset.lost){delete $('editseat').dataset.lost;$('editerror').textContent='選んでいた席は、ほかの方に決まりました。席を選び直すか、このままでよければもう一度「保存」を押してください。';$('editerror').hidden=false;$('editseat').focus();return;}
  if(!$('editseatwrap').hidden){const sv=$('editseat').value;if(sv!==editing.seat||patch.kind==='fixed'||patch.table!==undefined)patch.seat=sv?Number(sv):null;}
  if(!Object.keys(patch).length){$('editdialog').close();return;}
  const id=editing.id;
