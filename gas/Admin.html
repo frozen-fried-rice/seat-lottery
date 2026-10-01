@@ -996,7 +996,7 @@ function kindHint(){
 }
 $('editdrink').onchange=()=>{$('editdrink').dataset.touched='1';toggleOther();if($('editdrink').value==='other')$('editother').focus();};
 $('editkind').onchange=()=>{$('editkind').dataset.touched='1';kindHint();};
-$('edittable').onchange=()=>{$('edittable').dataset.touched='1';delete $('editseat').dataset.lost;fillSeats();};
+$('edittable').onchange=()=>{$('edittable').dataset.touched='1';if($('editseat').dataset.lost){delete $('editseat').dataset.lost;$('editerror').hidden=true;}fillSeats();}; // 卓を選び直したら、席が取られた知らせは消します
 $('editseat').onchange=()=>{$('editseat').dataset.touched='1';delete $('editseat').dataset.lost;};
 $('editcancel').onclick=()=>$('editdialog').close();
 $('editform').onsubmit=e=>{
